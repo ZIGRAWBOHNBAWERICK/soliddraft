@@ -505,6 +505,9 @@ pub struct ViewGeometry {
     /// Digest of the model the geometry was made from. A view whose digest differs from
     /// the model's is out of date.
     pub source_digest: String,
+    /// The transform that produced this saved line work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<crate::project::ViewTransform>,
     /// Visible and hidden curves.
     pub curves: Vec<Curve2>,
     /// Regions to hatch, for section views.

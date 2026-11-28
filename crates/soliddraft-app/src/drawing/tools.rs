@@ -38,6 +38,25 @@ pub(super) fn with_part<R>(
     f(&part, &index).map_err(|e| e.to_string())
 }
 
+pub(super) fn cache_picking(s: &mut DrawingSession, doc: &Document, view: ViewId) -> bool {
+    let current = s.model_is(doc.model().id())
+        && s.doc.drawing.view(view).is_some_and(|v| v.geometry.source_digest == super::part::digest(doc).as_str());
+    if !current {
+        return false;
+    }
+    if s.doc.transforms.contains_key(&view) {
+        return true;
+    }
+    if let Ok(projected) =
+        with_part(doc, |part, index| derived::context(&s.doc.drawing, part, index, view).map(|ctx| ctx.projected))
+    {
+        s.doc.remember(view, &projected);
+        true
+    } else {
+        false
+    }
+}
+
 /// The view a click lands in: the hit curve's view, or the view whose bounds hold the
 /// point.
 fn view_of_click(s: &DrawingSession, hit: Option<Hit>, p: Point2) -> Option<ViewId> {
@@ -181,6 +200,18 @@ pub(super) fn derived_tool(
     if let Some(pending) = s.draft.pending.clone() {
         place_pending(s, sheet2, lctx, pending, p, ctrl, clicked, push);
         return;
+    }
+    if clicked {
+        let target = match s.tool {
+            DrawingTool::Section { replace: Some(id) } => s.doc.drawing.view(id).and_then(|v| v.parent()),
+            DrawingTool::Section { .. } | DrawingTool::Detail | DrawingTool::HalfSection | DrawingTool::BrokenOut => {
+                s.draft.view.or_else(|| view_of_click(s, hit, p))
+            }
+            _ => None,
+        };
+        if let Some(view) = target {
+            cache_picking(s, doc, view);
+        }
     }
     match s.tool.clone() {
         DrawingTool::Section { replace } => section_tool(s, doc, sheet2, hit, p, clicked, replace, push),
@@ -500,6 +531,7 @@ fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, p
         s.say("Section: click at least two centres for an offset line, three points for an aligned one");
         return;
     }
+    cache_picking(s, doc, view);
     let Some(xf) = s.doc.transforms.get(&view) else {
         s.say("Rebuild the view before adding a cutting line");
         return;
@@ -574,7 +606,8 @@ fn break_tool(
     let axis =
         if (end.u - start.u).abs() >= (end.v - start.v).abs() { AlignAxis::Horizontal } else { AlignAxis::Vertical };
     // The clicks land on the view as drawn, also when the part has outgrown its break.
-    let ends = match s.doc.transforms.get(&view) {
+    let saved = s.doc.drawing.view(view).and_then(|view| view.geometry.transform);
+    let ends = match saved.or_else(|| s.doc.transforms.get(&view).copied()) {
         Some(xf) => Ok((xf.unproject(start), xf.unproject(end))),
         None => with_part(doc, |part, index| {
             let xf = project::ViewContext::break_edit_transform(&s.doc.drawing, part, index, view)?;
@@ -1042,13 +1075,14 @@ pub(super) fn set_tool(
                 return;
             }
             if (anchor.entity.section_leg != 0 || s.sheet().view(view).is_some_and(|v| !v.geometry.breaks.is_empty()))
-                && !with_part(doc, |_, index| {
-                    Ok(s.doc
-                        .transforms
-                        .get(&view)
-                        .is_some_and(|xf| soliddraft_drawing::measure::place_model_pick(index, xf, &mut anchor)))
-                })
-                .unwrap_or(false)
+                && !(cache_picking(s, doc, view)
+                    && with_part(doc, |_, index| {
+                        Ok(s.doc
+                            .transforms
+                            .get(&view)
+                            .is_some_and(|xf| soliddraft_drawing::measure::place_model_pick(index, xf, &mut anchor)))
+                    })
+                    .unwrap_or(false))
             {
                 s.say("Pick edges with measurable model geometry");
                 return;
@@ -1253,6 +1287,10 @@ pub(super) fn line_annotation_tool(
         s.say("Pick both edges in the same view");
         return;
     }
+    if !cache_picking(s, doc, view) {
+        s.say("Rebuild the drawing with its part before picking an edge");
+        return;
+    }
     let Some(v) = s.sheet().view(view) else { return };
     let Some(curve) = v.geometry.curves.get(curve).filter(|c| c.visible && c.kind == CurveKind::Edge) else {
         s.say("Pick a visible straight model edge");
@@ -1358,6 +1396,7 @@ pub(super) fn hole_table_tool(
         s.say("This view already has a hole table");
         return;
     }
+    cache_picking(s, doc, view);
     let Some(projected) = s.doc.projected_of(view) else {
         s.say("Rebuild the drawing with its part before making a hole table");
         return;

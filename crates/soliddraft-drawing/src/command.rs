@@ -478,16 +478,11 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         }
         Command::EditDimension { annotation, dimension } => {
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
-            match &mut a.body {
-                AnnotationKind::Dimension(d) => {
-                    if dimension_changes_requirement(d, dimension) {
-                        a.source = None;
-                    }
-                    *d = dimension.clone();
-                    Ok(())
-                }
-                _ => Err(DrawingError::BadRequest(format!("{annotation} is not a dimension"))),
+            if !matches!(a.body, AnnotationKind::Dimension(_)) {
+                return Err(DrawingError::BadRequest(format!("{annotation} is not a dimension")));
             }
+            edit_annotation_body(a, &AnnotationKind::Dimension(dimension.clone()));
+            Ok(())
         }
         Command::DeleteAnnotation { annotation } => {
             for sheet in &mut drawing.sheets {
@@ -664,7 +659,6 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             if property.is_empty() {
                 s.title_bindings.remove(key);
             } else {
-                s.format_overrides.remove(key);
                 s.title_bindings.insert(key.clone(), property.clone());
             }
             Ok(())
@@ -713,19 +707,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             if std::mem::discriminant(&a.body) != std::mem::discriminant(body) {
                 return Err(DrawingError::BadRequest(format!("{annotation} is another kind of annotation")));
             }
-            let changed = match (&a.body, body) {
-                (AnnotationKind::Dimension(before), AnnotationKind::Dimension(after)) => {
-                    dimension_changes_requirement(before, after)
-                }
-                (AnnotationKind::Note { text: before, .. }, AnnotationKind::Note { text: after, .. }) => {
-                    before != after
-                }
-                _ => a.body != *body,
-            };
-            if changed {
-                a.source = None;
-            }
-            a.body = body.clone();
+            edit_annotation_body(a, body);
             Ok(())
         }
         Command::AddTable { sheet, table } => {
@@ -892,6 +874,23 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
 }
 
 impl Command {
+    /// Whether the command can read geometry from the supplied part.
+    pub fn uses_part(&self, drawing: &Drawing) -> bool {
+        matches!(
+            self,
+            Self::UpdateFromModel
+                | Self::Reattach { .. }
+                | Self::EditView { .. }
+                | Self::SetViewCrop { .. }
+                | Self::AddBrokenOut { .. }
+                | Self::RemoveBrokenOut { .. }
+                | Self::SetViewBreaks { .. }
+                | Self::SetHalfSection { .. }
+                | Self::ReattachView { .. }
+                | Self::SetViewDisplay { .. }
+        ) || self.dimension_needs_model(drawing)
+    }
+
     /// Whether the command must measure anchors against the part before applying.
     pub fn dimension_needs_model(&self, drawing: &Drawing) -> bool {
         let annotation = match self {
@@ -910,8 +909,23 @@ impl Command {
             | Self::EditAnnotation { annotation, body: AnnotationKind::Dimension(dimension) } => {
                 let Some(a) = drawing.annotation(*annotation) else { return false };
                 let AnnotationKind::Dimension(before) = &a.body else { return false };
-                if (dimension.kind == before.kind && dimension.dim_type == before.dim_type)
-                    || !matches!(dimension.value, crate::DimValue::Measured { .. })
+                if !matches!(dimension.value, crate::DimValue::Measured { .. })
+                    || (dimension.kind == before.kind
+                        && dimension.dim_type == before.dim_type
+                        && dimension.value == before.value
+                        && dimension.chamfer_angle == before.chamfer_angle)
+                {
+                    return false;
+                }
+                a
+            }
+            Self::EditAnnotation { annotation, body: AnnotationKind::DimensionSet(after) } => {
+                let Some(a) = drawing.annotation(*annotation) else { return false };
+                let AnnotationKind::DimensionSet(before) = &a.body else { return false };
+                if before.kind == after.kind
+                    && before.orientation == after.orientation
+                    && before.dim_type == after.dim_type
+                    && before.values == after.values
                 {
                     return false;
                 }
@@ -925,13 +939,27 @@ impl Command {
     }
 }
 
-fn dimension_changes_requirement(before: &Dimension, after: &Dimension) -> bool {
-    before.kind != after.kind
-        || before.dim_type != after.dim_type
-        || before.value != after.value
-        || before.tolerance != after.tolerance
-        || before.chamfer_angle != after.chamfer_angle
-        || (before.text != after.text && !after.text.is_empty() && !after.text.contains(Dimension::VALUE_TEXT))
+fn edit_annotation_body(annotation: &mut Annotation, body: &AnnotationKind) {
+    fn text(dimension: &Dimension) -> &str {
+        if dimension.text.is_empty() { Dimension::VALUE_TEXT } else { &dimension.text }
+    }
+    let changed = match (&annotation.body, body) {
+        (AnnotationKind::Dimension(before), AnnotationKind::Dimension(after)) => {
+            before.kind != after.kind
+                || before.dim_type != after.dim_type
+                || before.value != after.value
+                || before.tolerance != after.tolerance
+                || before.chamfer_angle != after.chamfer_angle
+                || before.requirement != after.requirement
+                || text(before) != text(after)
+        }
+        (AnnotationKind::Note { text: before, .. }, AnnotationKind::Note { text: after, .. }) => before != after,
+        _ => annotation.body != *body,
+    };
+    if changed {
+        annotation.source = None;
+    }
+    annotation.body = body.clone();
 }
 
 fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation) -> Result<(), DrawingError> {
@@ -970,16 +998,17 @@ pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Resu
             }
             add_annotation(drawing, &measured).map(|_| None)
         }
-        Command::EditDimension { annotation, dimension }
-        | Command::EditAnnotation { annotation, body: AnnotationKind::Dimension(dimension) }
+        Command::EditDimension { annotation, .. } | Command::EditAnnotation { annotation, .. }
             if command.dimension_needs_model(drawing) =>
         {
             let mut measured = drawing.annotation(*annotation).expect("dimension to edit").clone();
-            let AnnotationKind::Dimension(before) = &measured.body else { unreachable!("dimension to edit") };
-            if dimension_changes_requirement(before, dimension) {
-                measured.source = None;
+            match command {
+                Command::EditDimension { dimension, .. } => {
+                    edit_annotation_body(&mut measured, &AnnotationKind::Dimension(dimension.clone()))
+                }
+                Command::EditAnnotation { body, .. } => edit_annotation_body(&mut measured, body),
+                _ => unreachable!(),
             }
-            measured.body = AnnotationKind::Dimension(dimension.clone());
             measure_dimension(drawing, part, &mut measured)?;
             *drawing.annotation_mut(*annotation).expect("dimension to edit") = measured;
             Ok(None)

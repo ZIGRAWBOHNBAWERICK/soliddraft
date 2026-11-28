@@ -1205,13 +1205,16 @@ fn smart_dimension_tool(
             if s.picks.contains(&pick) {
                 return;
             }
+            let current = tools::cache_picking(s, doc, view);
             let Some(v) = s.sheet().view(view) else { return };
             let mut picks = s.picks.clone();
             picks.push(pick);
             let circles = s.doc.circles.get(&view).map(Vec::as_slice).unwrap_or_default();
             let model = !v.geometry.breaks.is_empty()
                 || picks.iter().any(|p| v.geometry.curves.get(p.curve).is_some_and(|c| c.source.section_leg != 0));
-            let proposal = if model {
+            let proposal = if model && !current {
+                None
+            } else if model {
                 tools::with_part(doc, |_, index| {
                     let xf = s.doc.transforms.get(&view).ok_or(soliddraft_drawing::DrawingError::BadView(view))?;
                     Ok(resolve::propose_model(v, &picks, index, xf))
@@ -1341,6 +1344,7 @@ fn circle_tool(
     p: Point2,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    tools::cache_picking(s, doc, view);
     let Some(v) = s.sheet().view(view).cloned() else { return };
     let Some(c) = v.geometry.curves.get(index) else { return };
     let circle =

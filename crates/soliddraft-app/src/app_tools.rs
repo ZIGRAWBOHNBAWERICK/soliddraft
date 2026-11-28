@@ -847,7 +847,8 @@ impl AppTools<'_> {
             Value::Null => self.session()?.sheet().views.iter().map(|v| v.id).collect(),
             _ => vec![self.view(input)?.0],
         };
-        let added = drawing::add_centre_marks(self.session()?, &views);
+        let s = self.state.drawing.session.as_mut().ok_or(NO_DRAWING)?;
+        let added = drawing::add_centre_marks(s, &self.state.doc, &views);
         Ok(self.drawing_said(format!("{added} centre mark{} added", if added == 1 { "" } else { "s" })))
     }
 

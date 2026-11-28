@@ -821,8 +821,8 @@ impl DrawingSession {
 
     /// Sheet position of a model point in a view, for automation and the hover label.
     pub fn sheet_point(&self, view: ViewId, model: soliddraft_kernel_api::Vec3) -> Option<Point2> {
-        let xf = self.doc.transforms.get(&view)?;
         let v = self.doc.drawing.view(view)?;
+        let xf = self.doc.transforms.get(&view).copied().or(v.geometry.transform)?;
         let p = xf.point(model);
         Some(Point2::new(p.u + v.position.u, p.v + v.position.v))
     }
@@ -1197,28 +1197,6 @@ pub fn follow_part(state: &mut AppState) {
     session.part_seen = Some(part);
     let digest = part::digest(&state.doc);
     session.doc.seen_digest = digest.clone();
-    let missing: Vec<_> = session
-        .doc
-        .drawing
-        .sheets
-        .iter()
-        .flat_map(|sheet| &sheet.views)
-        .filter(|v| v.geometry.source_digest == digest.as_str() && !session.doc.transforms.contains_key(&v.id))
-        .map(|v| v.id)
-        .collect();
-    if !missing.is_empty()
-        && let Some(ctx) = PartContext::new(&state.doc)
-    {
-        let part = ctx.part();
-        if let Ok(index) = soliddraft_drawing::PartIndex::build(&part) {
-            let mut contexts = project::Contexts::new();
-            for id in missing {
-                if project::compute_in(&session.doc.drawing, &part, &index, id, &mut contexts).is_ok() {
-                    session.doc.remember(id, &contexts[&id].projected);
-                }
-            }
-        }
-    }
     if digest == session.doc.drawing.model.pinned {
         return;
     }
@@ -1824,7 +1802,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 Some(DrawingSel::View(id)) => vec![id],
                 _ => s.sheet().views.iter().map(|v| v.id).collect(),
             };
-            let added = add_centre_marks(s, &views);
+            let added = add_centre_marks(s, &state.doc, &views);
             s.say(format!("{added} centre mark{} added", if added == 1 { "" } else { "s" }));
         }
         DrawingAction::StartReattach { annotation, end } => {
@@ -1948,20 +1926,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
 /// Runs a drawing command as one undo step, with the open part when the command reads
 /// it. A command that reads the part refuses when the open part is not the drawing's.
 pub(crate) fn run_command(state: &mut AppState, cmd: Command) -> Result<(), String> {
-    let needs_part =
-        matches!(
-            cmd,
-            Command::UpdateFromModel
-                | Command::Reattach { .. }
-                | Command::EditView { .. }
-                | Command::SetViewCrop { .. }
-                | Command::AddBrokenOut { .. }
-                | Command::RemoveBrokenOut { .. }
-                | Command::SetViewBreaks { .. }
-                | Command::SetHalfSection { .. }
-                | Command::ReattachView { .. }
-                | Command::SetViewDisplay { .. }
-        ) || state.drawing.session.as_ref().is_some_and(|session| cmd.dimension_needs_model(&session.doc.drawing));
+    let needs_part = state.drawing.session.as_ref().is_some_and(|s| cmd.uses_part(&s.doc.drawing));
     if needs_part && !part_is_model(state) {
         return Err("The open part is not the one this drawing shows".into());
     }
@@ -2016,6 +1981,9 @@ fn after_history(s: &mut DrawingSession, sheet: Option<String>) {
 pub(crate) fn import_model_items(state: &mut AppState) -> Result<String, String> {
     let ctx = PartContext::new(&state.doc).ok_or("Model items: the part has no body")?;
     let s = state.drawing.session.as_mut().ok_or("No drawing is open")?;
+    if !s.model_is(ctx.id) {
+        return Err("The open part is not the one this drawing shows".into());
+    }
     let (items, skipped) = model_items(&ctx, &s.doc.drawing, s.sheet).map_err(|e| format!("Model items: {e}"))?;
     if items.is_empty() && skipped.is_empty() {
         return Ok("Model items: every model dimension is already on the sheet".to_owned());
@@ -2043,9 +2011,10 @@ pub(crate) fn import_model_items(state: &mut AppState) -> Result<String, String>
 
 /// Adds a centre mark to every circle the views show face-on that has none, one undo
 /// step each. Returns how many it added.
-pub(crate) fn add_centre_marks(s: &mut DrawingSession, views: &[ViewId]) -> usize {
+pub(crate) fn add_centre_marks(s: &mut DrawingSession, doc: &Document, views: &[ViewId]) -> usize {
     let mut added = 0;
     for &id in views {
+        tools::cache_picking(s, doc, id);
         let Some(p) = s.doc.projected_of(id) else { continue };
         let marks = project::centre_marks(&p, id, s.doc.next_annotation_id().0);
         for m in marks {

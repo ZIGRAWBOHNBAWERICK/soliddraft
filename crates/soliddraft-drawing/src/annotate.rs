@@ -58,9 +58,10 @@ fn anchor_on(
 
 /// The nearest model edge occurrence in the given view.
 pub fn view_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Option<Anchor> {
-    if ctx.xf.leg_turn(1).is_none() {
+    if ctx.xf.leg_turn(1).is_none() && ctx.xf.breaks.is_empty() {
         return anchor_near(index, &ctx.xf, at);
     }
+    let nearest = if ctx.xf.breaks.is_empty() { None } else { Some(curve_distance(nearest_edge(index, at)?.1, at)) };
     use kurbo::{ParamCurveNearest, Point, Shape};
     let (_, _, _, id, curve, leg) = ctx
         .projected
@@ -77,17 +78,25 @@ pub fn view_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Optio
             }
             let id = soliddraft_kernel_api::EdgeId::from_raw(projected.source.kernel_hint?);
             let curve = index.edge_curve(id)?;
+            let distance = curve_distance(curve, at);
+            if nearest.is_some_and(|nearest| distance > nearest + 1e-6) {
+                return None;
+            }
             let leg = projected.source.section_leg;
-            let at_on_leg = ctx.xf.leg_turn(leg).map_or(at, |turn| turn.point(at));
+            let at_on_leg = ctx.xf.point_on_leg(leg, at);
+            if ctx.xf.breaks.hides(at_on_leg.dot(ctx.xf.breaks.axis(&ctx.xf.frame))) {
+                return None;
+            }
             let q = ctx.xf.precise_point(at_on_leg);
             let nearest = projected
                 .path
                 .segments()
                 .map(|segment| segment.nearest(Point::new(q.u, q.v), 1e-6).distance_sq)
                 .fold(f64::INFINITY, f64::min);
-            Some((curve_distance(curve, at), nearest, !projected.visible, id, curve, leg))
+            Some((distance, nearest, !projected.visible, id, curve, leg))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)).then(a.5.cmp(&b.5)))?;
+    let at = ctx.retained_edge_point(id, leg, curve, at).unwrap_or(at);
     anchor_on(index, &ctx.xf, id, curve, leg, at)
 }
 

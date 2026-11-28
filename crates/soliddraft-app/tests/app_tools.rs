@@ -1463,3 +1463,46 @@ fn reference_planes_repair_messages_follow_suppressed_source_renames() {
         matches!(s.state.doc.model().status(soliddraft_model::FeatureId(id as u32)), Some(soliddraft_model::FeatureStatus::RepairNeeded(items)) if items[0].message.contains("Raised plane"))
     );
 }
+
+#[test]
+fn canonical_drawing_commands_keep_the_linked_part() {
+    use soliddraft_app::drawing::{self, NewDrawing};
+    use soliddraft_drawing::{AlignAxis, Break, Command, HalfSection};
+    use soliddraft_kernel_api::Vec3;
+    let mut state = AppState::new(board_bracket());
+    state.drawing.session = Some(drawing::create_drawing(&state, &NewDrawing::new()).unwrap());
+    let before = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
+    let original = state.doc.model().id();
+    state.doc = board_bracket();
+    assert_ne!(state.doc.model().id(), original);
+    let front = before.sheets[0].views[0].id;
+    let caller = Caller::Mcp { client: "drawing-parts".into() };
+    for command in [
+        Command::SetViewBreaks {
+            view: front,
+            breaks: vec![Break {
+                from: Vec3::new(30.0, 0.0, 0.0),
+                to: Vec3::new(70.0, 0.0, 0.0),
+                axis: AlignAxis::Horizontal,
+            }],
+        },
+        Command::SetHalfSection {
+            view: front,
+            half: Some(HalfSection { axis: [Vec3::new(0.0, 45.0, 5.0), Vec3::new(120.0, 45.0, 5.0)], flip: false }),
+        },
+    ] {
+        let input = json!({"op": "execute", "command": command}).to_string();
+        let result = call_checked(
+            &mut AppTools { state: &mut state },
+            "drawing_command",
+            json!({"command_json": input}),
+            &caller,
+        );
+        assert!(
+            result.is_error && result.content.contains("The open part is not the one this drawing shows"),
+            "{}",
+            result.content
+        );
+        assert_eq!(state.drawing.session.as_ref().unwrap().doc.drawing, before);
+    }
+}

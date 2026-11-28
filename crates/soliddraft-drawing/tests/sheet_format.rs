@@ -183,7 +183,7 @@ fn an_override_must_affect_title_text() {
 }
 
 #[test]
-fn binding_a_title_property_replaces_the_sheet_value() {
+fn binding_a_title_property_preserves_the_sheet_override() {
     let mut drawing = fixture::bracket_a3();
     drawing.source_properties.insert("Description".into(), "Bracket arm".into());
     let title = soliddraft_drawing::library::template("iso-a3").title_block.fields.iter().find(|f| f.key == "title");
@@ -194,9 +194,11 @@ fn binding_a_title_property_replaces_the_sheet_value() {
     assert_eq!(display::field_value(&drawing, 0, title), "Release");
     let bind = Command::BindTitleProperty { sheet: 0, key: "title".into(), property: "Description".into() };
     stack.run(&mut drawing, &bind, None).unwrap();
+    assert_eq!(display::field_value(&drawing, 0, title), "Release");
+    let clear = Command::SetTitleField { sheet: 0, key: "title".into(), value: String::new() };
+    stack.run(&mut drawing, &clear, None).unwrap();
     assert_eq!(display::field_value(&drawing, 0, title), "Bracket arm");
-    assert_eq!(drawing.sheets[0].format_overrides.get("title"), None);
-    assert_eq!(stack.undo(&mut drawing), Some("Bind title field"));
+    stack.undo(&mut drawing).unwrap();
     assert_eq!(display::field_value(&drawing, 0, title), "Release");
 }
 

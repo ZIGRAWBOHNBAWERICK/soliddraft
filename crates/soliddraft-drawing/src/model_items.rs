@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::drawing::{Curve3, CurveSource};
+use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::{EdgeId, Point2, Vec3};
 
 use crate::annotation::{
@@ -192,28 +192,6 @@ fn canonical_axis(a: Vec3) -> Vec3 {
     if big < 0.0 { -a } else { a }
 }
 
-/// True when the view shows the curve of `edge` as visible line work.
-pub(crate) fn visible_in(view: &ViewContext, edge: EdgeId) -> bool {
-    view.curves.curves.iter().any(|c| c.visible && c.source == CurveSource::Edge(edge))
-}
-
-fn occurrence_visibility(view: &ViewContext, edge: EdgeId, leg: u8) -> Option<bool> {
-    if !view.xf.has_aligned_legs() {
-        return Some(visible_in(view, edge));
-    }
-    view.projected
-        .geometry
-        .curves
-        .iter()
-        .filter(|curve| {
-            curve.kind == crate::CurveKind::Edge
-                && curve.source.kernel_hint == Some(edge.raw())
-                && curve.source.section_leg == leg
-        })
-        .map(|curve| curve.visible)
-        .max()
-}
-
 /// The best edge of the body lying in the plane through `p` normal to `axis` and not
 /// seen end on in `view`: visible first, then the longest in the view, then the nearest
 /// the eye.
@@ -224,14 +202,15 @@ pub(crate) fn plane_edge(
     axis: Vec3,
     tol: f64,
     leg: u8,
+    on_feature: impl Fn(EdgeId) -> bool,
 ) -> Option<(EdgeId, bool)> {
     let mut best: Option<((bool, f64, f64), EdgeId)> = None;
-    for (id, curve) in index.edges() {
+    for (id, curve) in index.edges().filter(|(id, _)| on_feature(*id)) {
         let samples = curve.sample(0.0);
         if !samples.iter().all(|q| (*q - p).dot(axis).abs() <= tol.max(1e-7)) {
             continue;
         }
-        let Some(visible) = occurrence_visibility(view, id, leg) else { continue };
+        let Some(visible) = view.edge_visibility(id, leg) else { continue };
         let (mut lo, mut hi) =
             (Point2::new(f64::INFINITY, f64::INFINITY), Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
         for q in &samples {
@@ -272,21 +251,22 @@ fn plan_distance(
     let mut best: Option<(i32, Plan)> = None;
     for (order, v) in views.iter().enumerate() {
         for leg in 0..=u8::from(v.xf.has_aligned_legs()) {
-            let f = &v.xf.frame;
-            let turned_axis = v.xf.point_on_leg(leg, axis) - v.xf.point_on_leg(leg, Vec3::ZERO);
-            if turned_axis.dot(f.direction).abs() > 1e-6 {
+            let frame = v.xf.in_leg(leg).frame;
+            let f = &frame;
+            if axis.dot(f.direction).abs() > 1e-6 {
                 continue;
             }
-            let orientation = if turned_axis.dot(f.right).abs() > 1.0 - 1e-6 {
+            let orientation = if axis.dot(f.right).abs() > 1.0 - 1e-6 {
                 LinearOrientation::Horizontal
-            } else if turned_axis.dot(f.up).abs() > 1.0 - 1e-6 {
+            } else if axis.dot(f.up).abs() > 1.0 - 1e-6 {
                 LinearOrientation::Vertical
             } else {
                 continue;
             };
-            let (Some((a, va)), Some((b, vb))) =
-                (plane_edge(index, v, from, axis, tol, leg), plane_edge(index, v, to, axis, tol, leg))
-            else {
+            let (Some((a, va)), Some((b, vb))) = (
+                plane_edge(index, v, from, axis, tol, leg, |_| true),
+                plane_edge(index, v, to, axis, tol, leg, |_| true),
+            ) else {
                 continue;
             };
             if a == b {
@@ -373,8 +353,7 @@ fn plan_diameter(
     let mut best: Option<((bool, i32, f64), Plan)> = None;
     for (order, v) in views.iter().enumerate() {
         for leg in 0..=u8::from(v.xf.has_aligned_legs()) {
-            let turned_normal = v.xf.point_on_leg(leg, n) - v.xf.point_on_leg(leg, Vec3::ZERO);
-            if turned_normal.dot(v.xf.frame.direction).abs() < 1.0 - 1e-6 {
+            if n.dot(v.xf.in_leg(leg).frame.direction).abs() < 1.0 - 1e-6 {
                 continue;
             }
             for (id, curve) in index.edges() {
@@ -392,7 +371,7 @@ fn plan_diameter(
                     continue;
                 }
                 // Visible first, then the earlier view, then the circle nearest the eye.
-                let Some(visible) = occurrence_visibility(v, id, leg) else { continue };
+                let Some(visible) = v.edge_visibility(id, leg) else { continue };
                 let c = v.xf.point_on_leg(leg, c);
                 let key = (visible, -(order as i32), v.xf.frame.depth(c));
                 let better = match &best {

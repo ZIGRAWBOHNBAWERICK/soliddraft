@@ -332,13 +332,14 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     drawing(&mut app, DrawingAction::CloseDrawing);
     drawing(&mut app, DrawingAction::OpenFile(path));
     settle(&mut app);
+    assert!(session(&app).doc.transforms.is_empty(), "opening keeps the picking cache empty");
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::SmartDimension));
     let reopened = view(&app, front);
     let end = reopened
         .geometry
         .curves
         .iter()
-        .find(|curve| {
+        .filter(|curve| {
             curve.visible
                 && curve.ends.is_some_and(|ends| {
                     let gap = reopened.geometry.breaks[0];
@@ -347,6 +348,10 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
                         && ends[0].u.max(ends[1].u) > gap.at + gap.gap
                 })
         })
+        .max_by(|a, b| {
+            let width = |[p, q]: [Point2; 2]| (p.u - q.u).abs();
+            width(a.ends.unwrap()).total_cmp(&width(b.ends.unwrap()))
+        })
         .expect("a line crossing the break");
     let [p, q] = end.ends.unwrap();
     let gap = reopened.geometry.breaks[0];
@@ -354,6 +359,7 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     let at = Point2::new((left.u + gap.at) / 2.0, left.v);
     click_view_point(&mut app, &reopened, at);
     let proposal = session(&app).proposal.as_ref().expect("a measured proposal after reopen");
+    assert_eq!(session(&app).doc.transforms.keys().copied().collect::<Vec<_>>(), [front]);
     let scale = soliddraft_drawing::project::view_scale(&session(&app).doc.drawing, front).unwrap();
     near(
         proposal.distance(soliddraft_drawing::LinearOrientation::Horizontal, scale),
@@ -877,6 +883,8 @@ fn the_sheet_panel_edits_and_clears_a_title_value_set_on_the_sheet() {
             property: "Description".into(),
         }),
     );
+    assert_eq!(app.get_by_label("Title field").value().as_deref(), Some("Updated"));
+    click_label(&mut app, "Title: use part property Description");
     assert_eq!(app.get_by_label("Title field").value().as_deref(), Some("Bracket arm"));
     app.get_by_label("Title from part property Description");
     app.get_by_label("Title field").focus();

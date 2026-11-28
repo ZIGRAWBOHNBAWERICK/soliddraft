@@ -90,6 +90,7 @@ fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>) -> String {
         .annotations
         .iter()
         .filter(|a| matches!(&a.body, AnnotationKind::RevisionSymbol { revision: r } if r == revision))
+        .filter(|a| a.view == crate::SHEET || sheet.view(a.view).is_some_and(crate::View::is_printed))
         .map(|a| zone_at(ctx.format, to_sheet(sheet, a.view, a.placement)))
         .collect();
     zones.sort();

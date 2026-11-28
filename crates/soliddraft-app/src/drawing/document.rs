@@ -266,6 +266,27 @@ impl DrawingDoc {
         let part_key = part.and_then(|p| p.doc.model().journal_key());
         let journal = self.journal_command(|| serde_json::json!({"op":"execute", "command":cmd, "part":part_key}));
         journal.finish((|| {
+            if cmd.uses_part(&self.drawing)
+                && let Some(part) = part
+            {
+                let model = &self.drawing.model;
+                let same = model.id.map_or_else(
+                    || {
+                        let stored = self
+                            .path
+                            .as_deref()
+                            .map_or_else(|| PathBuf::from(&model.path), |path| model.stored_path(path));
+                        let relative =
+                            |path: &Path| soliddraft_document::reference::relative_path(Path::new("."), path);
+                        !model.path.is_empty()
+                            && part.doc.path.as_deref().is_some_and(|path| relative(path) == relative(&stored))
+                    },
+                    |id| id == part.id,
+                );
+                if !same {
+                    return Err("The open part is not the one this drawing shows".into());
+                }
+            }
             if let Command::SetViewExcluded { view, excluded: true } = &cmd
                 && let Some((_, _, name, cause)) = self.refused_views().find(|(_, id, _, _)| id == view)
             {

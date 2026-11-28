@@ -395,6 +395,7 @@ fn view_geometry(view: StandardView, scale: f64, lines: fn(&mut Lines)) -> (View
     let (min, max) = (shift(bounds.origin()), shift(kurbo::Point::new(bounds.x1, bounds.y1)));
     let geometry = ViewGeometry {
         source_digest: DIGEST.to_owned(),
+        transform: Some(crate::project::ViewTransform::new(raw.frame, raw.scale, raw.centre)),
         curves,
         hatch: Vec::new(),
         outline: None,

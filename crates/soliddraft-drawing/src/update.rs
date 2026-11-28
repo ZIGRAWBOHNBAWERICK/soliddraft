@@ -153,6 +153,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     for id in ids {
         follow_parent(drawing, id, &contexts);
     }
+    let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     let failed = |id| report.dangling_views.iter().any(|failure| failure.view == id);
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
@@ -169,10 +170,14 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
     }
     // What the drawing shows of the part's manufacturing information follows the part:
     // its values, and which items there are.
-    let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
         // An item now shown another way is taken off here and drawn again by the import.
-        crate::pmi_items::refresh(drawing, part, |id| !failed(id), true);
+        crate::pmi_items::refresh(
+            drawing,
+            part,
+            |id| id == crate::SHEET || report.projections.iter().any(|(view, _)| *view == id),
+            true,
+        );
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
@@ -265,20 +270,24 @@ fn regenerate(
     let mut staged = None;
     if let Some(breaks) = breaks {
         // Where the views were drawn, so crops and callouts stay on the same material.
+        previous.extend(descendants.iter().filter_map(|&id| Some((id, drawing.view(id)?.geometry.transform?))));
         let mut before = Contexts::new();
         for &view in &ids {
-            // A break the part has outgrown no longer computes; its saved gap stands in.
-            let _ = project::compute_in(drawing, part, &index, view, &mut before);
+            if !previous.contains_key(&view) {
+                let _ = project::compute_in(drawing, part, &index, view, &mut before);
+            }
         }
-        previous = before
+        let estimated: Vec<_> = before
             .into_iter()
             .filter(|(id, _)| {
-                drawing.view(*id).is_some_and(|view| {
-                    view.geometry.breaks.is_empty() || view.geometry.source_digest == part.digest.as_str()
-                })
+                !previous.contains_key(id)
+                    && drawing.view(*id).is_some_and(|view| {
+                        view.geometry.breaks.is_empty() || view.geometry.source_digest == part.digest.as_str()
+                    })
             })
             .map(|(view, ctx)| (view, ctx.xf))
             .collect();
+        previous.extend(estimated);
         let mut next = drawing.clone();
         next.view_mut(id).expect("existing view").breaks = breaks;
         staged = Some(next);
@@ -410,6 +419,10 @@ pub(crate) fn re_resolve(
             Resolution::Lost(why) => Err(why),
         })
         .collect();
+    let resolved: Vec<Option<Entity>> = found.iter().map(|entity| entity.as_ref().ok().copied()).collect();
+    if !crate::pmi_items::anchors_on_item(a, &resolved, part, index) {
+        a.source = None;
+    }
     let lost: Vec<usize> = found.iter().enumerate().filter(|(_, r)| r.is_err()).map(|(i, _)| i).collect();
     if !lost.is_empty() {
         let refs: Vec<&EntityRef> = lost.iter().map(|i| &a.anchors[*i].entity).collect();
@@ -649,6 +662,10 @@ pub fn reattach(
             anchor.attach = Attach::Centre;
         } else if !round && matches!(anchor.attach, Attach::Centre | Attach::Silhouette) {
             anchor.attach = Attach::Mid;
+        } else if matches!(anchor.attach, Attach::Point { .. }) {
+            let mid = curve.point_at(0.5);
+            let at = ctx.retained_edge_point(edge, anchor.entity.section_leg, curve, mid).unwrap_or(mid);
+            anchor.attach = Attach::Point { at };
         }
         let curve = anchor_curve(&ctx, anchor, Some(curve));
         let g = anchor_geometry(&ctx.xf, anchor, curve.as_deref());
@@ -666,7 +683,7 @@ pub fn reattach(
         return Err(DrawingError::BadRequest(format!("the new reference for end {end} of {id} does not resolve")));
     }
     let entities: Vec<Entity> = resolved.iter().flatten().copied().collect();
-    if !crate::pmi_items::anchors_on_item(a, &entities, part)? {
+    if !crate::pmi_items::anchors_on_item(a, &resolved, part, &index) {
         a.source = None;
     }
     if let AnnotationState::Dangling { lost, cause } = &a.state {

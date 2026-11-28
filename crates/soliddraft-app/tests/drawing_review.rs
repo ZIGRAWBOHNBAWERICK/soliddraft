@@ -76,14 +76,14 @@ fn review_value(app: &App, column: &str, value: &str) {
 fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_drawing_revision() {
     let root = std::env::temp_dir().join(format!("soliddraft-drawing-review-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
-    for folder in ["parts", "config"] {
+    for folder in ["parts", "drawings", "config"] {
         std::fs::create_dir_all(root.join(folder)).unwrap();
     }
     soliddraft_app::file::set_config_dir(Some(root.join("config")));
     let baseline = root.join("parts/bracket-a.dwprt");
     let candidate = root.join("parts/bracket-b.dwprt");
-    let drawing_path = root.join("parts/bracket-b.dwdrw");
-    let edited_drawing = root.join("parts/bracket-b-owner.dwdrw");
+    let drawing_path = root.join("drawings/bracket-b.dwdrw");
+    let edited_drawing = root.join("drawings/bracket-b-owner.dwdrw");
     let markup_path = root.join("bracket-b-review.json");
     let stale_markup_path = root.join("stale-review.json");
     let part_markup_path = root.join("part-review.json");
@@ -326,7 +326,7 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     review_value(&app, "Baseline", "Ø8 H7");
     review_value(&app, "Candidate", "Ø8 H8");
 
-    let moved_folder = root.join("drawings");
+    let moved_folder = root.join("copied-drawings");
     std::fs::create_dir_all(&moved_folder).unwrap();
     let copied = moved_folder.join("review-copy.dwdrw");
     drawing(
@@ -358,4 +358,88 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     }
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_saved_wedge_drawing_keeps_the_authored_120_degree_faces() {
+    use soliddraft_app::document::{Command as PartCommand, ExtrudeParams, PlaneKind, SketchPlane};
+    use soliddraft_app::drawing::part::PartContext;
+    use soliddraft_app::sketch::{P2, Sketch};
+    use soliddraft_drawing::{Entity, PartIndex, Resolution};
+    use soliddraft_kernel_api::{Vec3, pmi::PmiItem};
+    let kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+    let mut doc = Document::new("Wedge", kernel);
+    let sketch = doc
+        .apply(PartCommand::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Front, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    let rise = 20.0 / 3.0_f64.sqrt();
+    let mut profile = Sketch::new();
+    profile
+        .polyline_loop(&[
+            P2::ZERO,
+            P2::new(40.0, 0.0),
+            P2::new(40.0, 20.0),
+            P2::new(20.0, 20.0 + rise),
+            P2::new(0.0, 20.0 + rise),
+        ])
+        .unwrap();
+    doc.apply(PartCommand::EditSketch { id: sketch, sketch: profile }).unwrap();
+    doc.apply(PartCommand::AddExtrude {
+        params: ExtrudeParams { sketch: Some(sketch), depth: 20.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let body = doc.model().body().unwrap();
+    let topology = doc.kernel().topology(body).unwrap();
+    let find_face = |x: f64, z: f64| {
+        topology
+            .faces
+            .iter()
+            .find(|face| face.normal.is_some_and(|n: Vec3| (n.x - x).abs() < 1e-6 && (n.z.abs() - z).abs() < 1e-6))
+            .expect("a face with the expected outward normal")
+            .id
+    };
+    let faces = [find_face(1.0, 0.0), find_face(0.5, 3.0_f64.sqrt() / 2.0)];
+    let name = "Interior wedge angle";
+    let planes = faces.map(|id| vec![doc.model().face_ref(id).unwrap()]);
+    doc.put_pmi(PmiItem { id: name.into(), kind: PmiKind::BasicAngle { planes } }, None).unwrap();
+    let context = PartContext::new(&doc).expect("the wedge has a body");
+    let part = context.part();
+    let row = part.requirements.rows.iter().find(|row| row.item.id == name).unwrap();
+    assert!((row.measured[0] - 120.0).abs() < 1e-6);
+    let template = soliddraft_drawing::Template::by_id("iso-a3").unwrap();
+    let request = soliddraft_drawing::NewDrawing {
+        template,
+        views: vec![soliddraft_kernel_api::drawing::StandardView::Front],
+        model: soliddraft_drawing::DocRef::new(
+            context.id,
+            soliddraft_drawing::DocKind::Part,
+            "wedge.dwprt",
+            part.digest.clone(),
+        ),
+        meta: Default::default(),
+        hidden: soliddraft_drawing::HiddenLines::Visible,
+        model_items: false,
+        centre_marks: false,
+        requirements: true,
+        scale: None,
+    };
+    let mut drawing = soliddraft_drawing::make_drawing(&part, &request).unwrap().drawing;
+    let report = soliddraft_drawing::update_from_model(&mut drawing, &part).unwrap();
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+    let meta = soliddraft_drawing::file::FileMeta::new("test", drawing.meta.units);
+    let (saved, _) =
+        soliddraft_drawing::file::from_bytes(&soliddraft_drawing::file::to_bytes(&drawing, &meta).unwrap()).unwrap();
+    let target = soliddraft_drawing::review::place_of_item(&saved, name).unwrap();
+    let angle = saved.annotation(target.annotation).unwrap();
+    assert_eq!(angle.state, AnnotationState::Ok);
+    assert!(matches!(&angle.body, AnnotationKind::Dimension(d)
+        if matches!(d.value, DimValue::Measured { value } if (value - 120.0).abs() < 1e-6)));
+    let [a, b] = angle.anchors.as_slice() else { panic!("the two angle faces") };
+    let index = PartIndex::build(&part).unwrap();
+    for (anchor, expected) in [a, b].into_iter().zip(faces) {
+        let Resolution::Found(Entity::Edge(edge)) = index.resolve(&anchor.entity) else { panic!("a saved angle edge") };
+        assert!(topology.edge(edge).unwrap().faces.contains(&expected), "wrong face for {edge:?}");
+    }
 }

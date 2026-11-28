@@ -374,7 +374,7 @@ impl Band {
 
 /// A rotation about an axis through a point: how an aligned section's second cut is
 /// revolved into the plane of the first.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Turn {
     pivot: Vec3,
     axis: Vec3,
@@ -384,6 +384,10 @@ pub(crate) struct Turn {
 
 impl Turn {
     const NONE: Turn = Turn { pivot: Vec3::ZERO, axis: Vec3::Z, cos: 1.0, sin: 0.0 };
+
+    pub(crate) fn inverse_vector(&self, v: Vec3) -> Vec3 {
+        Turn { sin: -self.sin, ..*self }.vector(v)
+    }
 
     fn vector(&self, v: Vec3) -> Vec3 {
         let k = self.axis;

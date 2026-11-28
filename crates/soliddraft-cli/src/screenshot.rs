@@ -51,6 +51,8 @@ pub(crate) struct Renderer {
     queue: wgpu::Queue,
     offscreen: Offscreen,
     metadata: serde_json::Value,
+    /// The adapter's name, backend and device type, for the GPU preview's delivery record.
+    pub(crate) adapter: serde_json::Value,
 }
 
 impl Renderer {
@@ -68,9 +70,9 @@ impl Renderer {
         // adapter has one, then the checked mesh.
         let _ = soliddraft_app::viewport::gpu_preview::install(&info, &device, &queue);
         let metadata = json!({"renderer":"soliddraft_app::viewport::render::ViewportRenderer",
-            "adapter":info.name,"backend":format!("{:?}",info.backend),"device_type":format!("{:?}",info.device_type),"size":[960,720],
-            "gpu_preview":soliddraft_app::viewport::gpu_preview::status()});
-        Ok(Self { device, queue, offscreen, metadata })
+            "adapter":info.name,"backend":format!("{:?}",info.backend),"size":[960,720]});
+        let adapter = json!({"name":info.name,"backend":format!("{:?}",info.backend),"device_type":format!("{:?}",info.device_type)});
+        Ok(Self { device, queue, offscreen, metadata, adapter })
     }
 
     pub(crate) fn capture(&mut self, doc: &Document, png: &Path) -> Result<usize, Box<dyn std::error::Error>> {

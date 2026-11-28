@@ -33,7 +33,8 @@ fn selectable(doc: &Document) {
     for face in &doc.faces {
         let pick = doc.pick_of_face(face.id).expect("face pick");
         assert!(matches!(doc.pick(pick), Some(PickEntry::Face(_, id)) if id == face.id));
-        assert!(mesh.face_picks.contains(&pick));
+        // The GPU preview, on a machine with a GPU, draws its faces from its own buffers.
+        assert!(mesh.face_picks.contains(&pick) || mesh.gpu.as_ref().is_some_and(|gpu| gpu.draws(pick)));
     }
     for edge in &doc.edges {
         let pick = doc.pick_of_edge(edge.id).expect("edge pick");

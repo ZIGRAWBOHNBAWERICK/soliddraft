@@ -10,9 +10,10 @@ mod bindings {
         env!("SOLIDDRAFT_COMMIT").to_owned()
     }
 
+    /// Runs job `id`; a checked build posts its rebuilt part to the page before answering.
     #[wasm_bindgen]
-    pub fn kernel_worker_run(header: &str, part: &[u8]) -> String {
-        worker_run(header, part)
+    pub fn kernel_worker_run(header: &str, part: &[u8], id: f64) -> String {
+        worker_run(header, part, id)
     }
 
     #[wasm_bindgen]

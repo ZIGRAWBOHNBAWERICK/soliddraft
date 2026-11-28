@@ -117,11 +117,19 @@ fn marks(app: &ribbon::App) -> Vec<String> {
         .collect()
 }
 
+/// These checks hold the CPU preview route, the display without a usable GPU and the
+/// one CI runs. On a machine with a GPU the harness installs the GPU preview, whose own
+/// route `tests/gpu_preview.rs` checks; this takes it off for this thread.
+fn cpu_route() {
+    soliddraft_app::viewport::gpu_preview::uninstall();
+}
+
 #[test]
 fn boundary_model_features_show_at_once_from_their_own_faces() {
     let case = ribbon::case("field-preview-brep");
     let (catallax, kernel, doc) = observed_display();
     let mut app = ribbon::app(doc);
+    cpu_route();
     case.run(&mut app, |app| {
         tool(
             app,
@@ -184,6 +192,7 @@ fn lattices_and_gyroids_show_at_once_from_their_field_sample() {
     for (name, verb, input, grade) in cases {
         let (catallax, kernel, doc) = observed_display();
         let mut app = ribbon::app(doc);
+        cpu_route();
         case.run(&mut app, |app| {
             block(app);
             let (before, _) = shown(app);
@@ -204,11 +213,11 @@ fn lattices_and_gyroids_show_at_once_from_their_field_sample() {
             let expected: Vec<[f32; 3]> = sample.indices.iter().map(|i| sample.positions[*i as usize]).collect();
             assert_eq!(drawn, expected, "{name} is drawn from its field sample");
             app.run_steps(4);
-            assert!(app.query_by_label(UNPROVED).is_some(), "{name}: the viewport labels the field preview");
+            assert!(app.query_by_label(UNPROVED).is_none(), "{name}: nothing about checking shows to the user");
             assert!(marks(app).is_empty(), "{name}: a built field has no mark: {:?}", marks(app));
             let last = app.state().state.doc.features.last().unwrap();
             assert_eq!(last.status, FeatureStatus::Ok, "{name}");
-            assert_eq!(last.summary(), "unproved preview · ±0.50 mm", "{name}");
+            assert_eq!(last.summary(), "±0.50 mm", "{name}");
             case.frame(app, name);
         });
     }
@@ -298,7 +307,7 @@ fn a_preview_on_screen_does_not_make_an_export_the_kernel_refuses() {
         app.run_steps(4);
         let (body, _) = shown(app);
         assert_eq!(app.state().state.doc.features.last().unwrap().status, FeatureStatus::Ok);
-        assert!(app.query_by_label(UNPROVED).is_some(), "the screen shows the gyroid's preview");
+        assert!(app.query_by_label(UNPROVED).is_none(), "the gyroid's preview carries no label");
         kernel.take_routes();
         let path = case.path("gyroid.stl");
         std::fs::write(&path, b"previous file").unwrap();
@@ -374,7 +383,7 @@ fn a_field_waiting_on_an_upstream_edit_is_marked_working_and_exports_nothing() {
         tool(app, "gyroid", json!({"kind":"network","period":10,"level":0,"accuracy":0.5,"min_detail":0.5}));
         app.run_steps(4);
         let (built, _) = shown(app);
-        assert!(app.query_by_label(UNPROVED).is_some());
+        assert!(app.query_by_label(UNPROVED).is_none());
 
         kernel.rules.lock().unwrap().hold = Some(12.0);
         app.state_mut().state.doc.apply_interactive(Command::EditExtrude { id: block, params: params(12.0) }).unwrap();
@@ -392,7 +401,7 @@ fn a_field_waiting_on_an_upstream_edit_is_marked_working_and_exports_nothing() {
         let doc = &app.state().state.doc;
         assert_eq!(doc.meshes.keys().copied().collect::<Vec<_>>(), [built], "the built gyroid stays on screen");
         assert!(doc.provisional_mesh().is_none(), "no construction stands in for the field");
-        assert!(app.query_by_label(UNPROVED).is_some());
+        assert!(app.query_by_label(UNPROVED).is_none());
         assert_eq!(
             app.state().state.export_part(Format::Stl).unwrap_err(),
             "The current edit is still working. Export waits for it."
@@ -405,7 +414,7 @@ fn a_field_waiting_on_an_upstream_edit_is_marked_working_and_exports_nothing() {
         assert_eq!(gyroid.status, FeatureStatus::Ok);
         assert!(marks(app).is_empty(), "marks: {:?}", marks(app));
         assert_ne!(shown(app).0, built, "the rebuilt gyroid replaces the earlier one");
-        assert!(app.query_by_label(UNPROVED).is_some());
+        assert!(app.query_by_label(UNPROVED).is_none());
         case.frame(app, "rebuilt");
     });
 }

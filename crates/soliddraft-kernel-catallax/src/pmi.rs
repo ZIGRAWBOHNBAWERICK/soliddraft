@@ -268,7 +268,7 @@ fn app_item<F: Clone>(item: &cx::Item<F>) -> Option<PmiItem<F>> {
     let kind = match &item.kind {
         cx::ItemKind::Datum(datum) => PmiKind::Datum { letter: datum.letter.clone(), feature: datum.feature.clone() },
         cx::ItemKind::Size(size) => PmiKind::Size {
-            size: match size.kind {
+            size: match &size.kind {
                 cx::SizeKind::Diameter => SizeKind::Diameter,
                 cx::SizeKind::Radius => SizeKind::Radius,
                 // The app does not yet import a compound STEP hole callout. Report it

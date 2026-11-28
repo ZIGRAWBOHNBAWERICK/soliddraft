@@ -36,6 +36,11 @@ pub enum MeshRoute {
     Print,
     /// `export_field_stl`, at the field's own or a chosen accuracy: a field's STL.
     FieldExport,
+    /// `gpu_preview`: the float description the screen meshes on its GPU.
+    GpuPreview,
+    /// `checked_rendering` and its edges and levels: the checked display that replaces a
+    /// GPU preview.
+    Checked,
 }
 
 /// `inner`, with the work asked of it written down.
@@ -501,6 +506,34 @@ impl Kernel for Counting {
         self.note(Work::Mesh(body));
         self.route(body, MeshRoute::Display);
         self.inner.preview_edges(body, params)
+    }
+
+    fn checked_rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Checked);
+        self.inner.checked_rendering(body, params)
+    }
+
+    fn checked_rendering_levels(&self, body: BodyId, levels: &[TessellationParams]) -> KernelResult<Vec<Mesh>> {
+        self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Checked);
+        self.inner.checked_rendering_levels(body, levels)
+    }
+
+    fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Checked);
+        self.inner.checked_rendering_edges(body, params)
+    }
+
+    fn gpu_preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<crate::GpuPreview>> {
+        self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::GpuPreview);
+        self.inner.gpu_preview(body, params)
+    }
+
+    fn face_ray_point(&self, body: BodyId, face: FaceId, origin: Vec3, direction: Vec3) -> KernelResult<Option<Vec3>> {
+        self.inner.face_ray_point(body, face, origin, direction)
     }
 
     fn mass_properties(&self, body: BodyId) -> KernelResult<MassProperties> {

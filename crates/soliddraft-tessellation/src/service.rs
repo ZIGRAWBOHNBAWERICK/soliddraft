@@ -10,6 +10,9 @@
 //! it if it has not started, and its answer is dropped if it has. [`poll`] only returns
 //! answers to the latest request of each key.
 //!
+//! A request takes one of two routes: the CPU preview where it is the display, or the
+//! checked meshes that replace a GPU preview ([`Route`]).
+//!
 //! The caller keeps the body alive until its answer arrives or it cancels the request;
 //! a body released early answers with [`KernelError::UnknownBody`].
 //!
@@ -27,6 +30,18 @@ use std::time::Duration;
 
 use soliddraft_kernel_api::{BodyId, Kernel, KernelResult, Mesh, TessellationParams};
 
+/// Which kernel call answers a request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Route {
+    /// [`preview_levels`](Kernel::preview_levels): the CPU preview, which the screen
+    /// shows where no GPU preview runs.
+    #[default]
+    Preview,
+    /// [`checked_rendering_levels`](Kernel::checked_rendering_levels): the checked
+    /// meshes that replace a GPU preview.
+    Checked,
+}
+
 /// One answered request.
 #[derive(Debug)]
 pub struct Done<K> {
@@ -43,6 +58,7 @@ struct Job<K> {
     generation: u64,
     body: BodyId,
     levels: Vec<TessellationParams>,
+    route: Route,
 }
 
 /// The latest generation of each key not yet answered or cancelled.
@@ -53,7 +69,11 @@ fn is_latest<K: Eq + Hash>(latest: &Latest<K>, key: &K, generation: u64) -> bool
 }
 
 fn answer<K>(kernel: &dyn Kernel, job: Job<K>) -> Done<K> {
-    Done { result: kernel.preview_levels(job.body, &job.levels), key: job.key, generation: job.generation }
+    let result = match job.route {
+        Route::Preview => kernel.preview_levels(job.body, &job.levels),
+        Route::Checked => kernel.checked_rendering_levels(job.body, &job.levels),
+    };
+    Done { result, key: job.key, generation: job.generation }
 }
 
 /// Tessellates bodies on a worker thread.
@@ -102,10 +122,15 @@ impl<K: Clone + Eq + Hash + Send + 'static> Tessellator<K> {
     /// Asks for `body` tessellated at each of `levels`, superseding any earlier request
     /// for `key`. Returns the request's generation.
     pub fn request(&mut self, key: K, body: BodyId, levels: &[TessellationParams]) -> u64 {
+        self.request_route(key, body, levels, Route::Preview)
+    }
+
+    /// [`request`](Self::request) by `route`.
+    pub fn request_route(&mut self, key: K, body: BodyId, levels: &[TessellationParams], route: Route) -> u64 {
         let generation = self.next;
         self.next += 1;
         self.latest.lock().expect("tessellator lock").insert(key.clone(), generation);
-        let job = Job { key, generation, body, levels: levels.to_vec() };
+        let job = Job { key, generation, body, levels: levels.to_vec(), route };
         // The worker only stops when the tessellator is dropped.
         #[cfg(not(target_arch = "wasm32"))]
         let _ = self.jobs.send(job);

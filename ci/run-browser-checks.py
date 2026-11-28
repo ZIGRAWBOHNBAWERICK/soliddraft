@@ -40,6 +40,8 @@ def run(case, root, temp):
                CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH='/usr/bin/google-chrome',
                CHROME_DEVTOOLS_AXI_CHROME_ARGS=(
                    '--no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader'))
+    if case.get('swiftshader_webgpu'):
+        env['CHROME_DEVTOOLS_AXI_CHROME_ARGS'] += ' --use-webgpu-adapter=swiftshader'
     if 'fixture' in case:
         fixture = case['fixture']
         shutil.copyfile(root / fixture['source'], root / 'target/web-dist' / fixture['destination'])
@@ -57,7 +59,8 @@ def run(case, root, temp):
                     chrome('stop', check=False)
                     chrome('open', 'about:blank')
                 chrome('emulate', '--viewport', '1400x813x1')
-                chrome('open', f'http://127.0.0.1:{case["port"]}/{case.get("query", "")}')
+                path = case.get('path', '') + case.get('query', '')
+                chrome('open', f'http://127.0.0.1:{case["port"]}/{path}')
                 with (root / case['script']).open() as script:
                     chrome('run', stdin=script)
             finally:

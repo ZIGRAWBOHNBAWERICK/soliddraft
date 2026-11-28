@@ -129,6 +129,14 @@ class JudgePartTest(unittest.TestCase):
         self.assertIsNone(preview.excluded(brep))
         self.assertFalse(preview.readback_record(brep, ADAPTER, False)['accepted'])
 
+    def test_faces_judged_against_their_trimmed_carrier_are_listed(self):
+        spline = {'face': 'FaceId(35)', 'surface': 'Spline', 'reference': 'trimmed carrier', 'deviation_mm': 0.0,
+                  'checked_deviation_mm': 0.005, 'carrier_deviation_mm': 0.0, 'checked_sag_mm': 0.0054}
+        plane = {'face': 'FaceId(37)', 'surface': 'Plane', 'reference': 'checked mesh', 'deviation_mm': 0.0}
+        listed = preview.carrier_faces(part(bodies=[{'face_detail': [spline, plane]}]))
+        self.assertEqual([face['face'] for face in listed], ['FaceId(35)'])
+        self.assertEqual(listed[0]['checked_sag_mm'], 0.0054)
+
     def test_the_control_needs_the_cpu_route(self):
         off = part(status='GPU preview off, CPU preview kept (preview.gpu-disabled)', route='cpu',
                    counts={'gpu_previews': 0, 'cpu_previews': 1})

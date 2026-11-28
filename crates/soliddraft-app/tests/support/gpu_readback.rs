@@ -16,7 +16,9 @@ use serde_json::{Value, json};
 use soliddraft_app::document::{DisplayMesh, Document};
 use soliddraft_app::viewport::gpu_preview::{self, GpuFaces};
 use soliddraft_app::viewport::offscreen::{Offscreen, Picture};
-use soliddraft_kernel_api::{BodyId, BodyKind, FaceId, Mesh, Topology};
+use soliddraft_kernel_api::{BodyId, BodyKind, EdgeId, FaceId, Kernel, Mesh, SurfaceKind, Topology};
+
+use super::trimmed_carrier::{Point, Triangles, TrimmedCarrier};
 use soliddraft_kernel_catallax::gpu_preview::PreviewVertex;
 
 /// The frame size of the pictures, the native P1 gate's window size.
@@ -152,7 +154,16 @@ fn read_back(
         }
         let checked =
             kernel.checked_rendering(*body, &doc.tess_params).map_err(|e| format!("checked mesh of {body:?}: {e}"))?;
-        let mut checks = check_body(device, gpu, mesh, &topology, &checked, tolerance);
+        // The face boundaries the trimmed carrier is measured against when a point is
+        // off its face: the kernel's checked edge samples.
+        let edges: HashMap<EdgeId, Vec<Point>> = kernel
+            .checked_rendering_edges(*body, &doc.tess_params)
+            .map_err(|e| format!("checked edges of {body:?}: {e}"))?
+            .into_iter()
+            .map(|edge| (edge.edge, edge.points.iter().map(|p| [p.x, p.y, p.z]).collect()))
+            .collect();
+        let reference = Reference { kernel: kernel.as_ref(), body: *body, checked: &checked, edges: &edges };
+        let mut checks = check_body(device, gpu, mesh, &topology, &reference, tolerance);
         checks["body"] = json!(format!("{body:?}"));
         for problem in checks["problems"].as_array().into_iter().flatten() {
             problems.push(format!("{body:?}: {}", problem.as_str().unwrap_or_default()));
@@ -238,14 +249,24 @@ type Key = [u32; 3];
 /// refused, by the CPU preview; a closed, consistently wound GPU mesh whose open edges
 /// meet only CPU-drawn faces; and every GPU vertex within `tolerance` of its face in the
 /// checked mesh.
+/// What a body's GPU preview is measured against: its checked mesh, and the kernel's
+/// binary64 carriers restricted to each face's trim.
+struct Reference<'a> {
+    kernel: &'a dyn Kernel,
+    body: BodyId,
+    checked: &'a Mesh,
+    edges: &'a HashMap<EdgeId, Vec<Point>>,
+}
+
 fn check_body(
     device: &Device,
     gpu: &GpuFaces,
     mesh: &DisplayMesh,
     topology: &Topology,
-    checked: &Mesh,
+    reference: &Reference<'_>,
     tolerance: f64,
 ) -> Value {
+    let checked = reference.checked;
     let mut problems = Vec::new();
     let origin = gpu.meshed.origin;
     let (vertices, indices) = match read_buffers(device, gpu) {
@@ -256,7 +277,12 @@ fn check_body(
         }
     };
     let cpu = Triangles::new(
-        mesh.indices.as_chunks::<3>().0.iter().map(|t| t.map(|i| mesh.positions[i as usize].as_dvec3().to_array())),
+        mesh.indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| t.map(|i| mesh.positions[i as usize].as_dvec3().to_array()))
+            .collect(),
         tolerance,
     );
     let cpu_picks: std::collections::HashSet<u32> = mesh.face_picks.iter().copied().collect();
@@ -308,17 +334,34 @@ fn check_body(
             continue;
         }
         let own = &indices[range.start as usize..range.end as usize];
-        let reference = Triangles::new(
-            checked
-                .indices
-                .as_chunks::<3>()
-                .0
-                .iter()
-                .zip(&checked.triangle_faces)
-                .filter(|(_, face)| **face == meshed.face)
-                .map(|(t, _)| t.map(|i| checked.positions[i as usize].map(f64::from))),
+        let own_checked: Vec<[Point; 3]> = checked
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(&checked.triangle_faces)
+            .filter(|(_, face)| **face == meshed.face)
+            .map(|(t, _)| t.map(|i| checked.positions[i as usize].map(f64::from)))
+            .collect();
+        let info = topology.face(meshed.face);
+        let boundary: Vec<Vec<Point>> = info
+            .map(|info| info.edges.iter().filter_map(|edge| reference.edges.get(edge).cloned()).collect())
+            .unwrap_or_default();
+        let carrier = TrimmedCarrier::new(
+            reference.kernel,
+            reference.body,
+            meshed.face,
+            own_checked.clone(),
+            boundary,
             tolerance,
         );
+        let checked_face = Triangles::new(own_checked, tolerance);
+        // A spline face's checked mesh, or any checked face coarser than the tolerance,
+        // cannot judge a preview to the tolerance: the trimmed carrier does instead.
+        let spline = info.is_some_and(|info| info.surface == SurfaceKind::Spline);
+        let by_carrier = spline || carrier.sag > tolerance;
+        let (mut from_checked, mut from_carrier): (f64, f64) = (0.0, 0.0);
+        let (mut off_face, mut no_hit) = (0, 0);
         let mut deviation: f64 = 0.0;
         let mut bad_normals = 0;
         let mut bad_normal = None;
@@ -336,7 +379,13 @@ fn check_body(
                 bad_normals += 1;
                 bad_normal.get_or_insert((world(index), normal));
             }
-            deviation = deviation.max(reference.distance(world(index)));
+            let point = world(index);
+            from_checked = from_checked.max(checked_face.distance(point));
+            let measured = carrier.measure(point, std::array::from_fn(|i| f64::from(normal[i])), tolerance);
+            from_carrier = from_carrier.max(measured.distance);
+            off_face += usize::from(!measured.on_face);
+            no_hit += usize::from(!measured.hit);
+            deviation = if by_carrier { from_carrier } else { from_checked };
         }
         // Each triangle by its corners in winding order, rotated to start at the least, so a
         // copy drawn the same way and a copy drawn the other way can both be recognised.
@@ -391,11 +440,11 @@ fn check_body(
                 usage.2.push(meshed.face);
             }
         }
-        if reference.is_empty() {
+        let against = if by_carrier { "its trimmed carrier" } else { "the checked mesh" };
+        if checked_face.is_empty() {
             problems.push(format!("face {:?}: the checked mesh has no triangles for it", meshed.face));
         } else if deviation > tolerance {
-            problems
-                .push(format!("face {:?}: {deviation:.5} mm from the checked mesh, over {tolerance} mm", meshed.face));
+            problems.push(format!("face {:?}: {deviation:.5} mm from {against}, over {tolerance} mm", meshed.face));
         }
         if slivers > 0 {
             findings.push(format!("face {:?}: {slivers} zero-area triangles", meshed.face));
@@ -414,12 +463,20 @@ fn check_body(
                 bad_normal.unwrap_or_default()
             ));
         }
-        worst = worst.max(if reference.is_empty() { 0.0 } else { deviation });
+        worst = worst.max(if checked_face.is_empty() { 0.0 } else { deviation });
         faces.push(json!({
             "face": format!("{:?}", meshed.face),
             "triangles": own.len() / 3,
             "sampled": meshed.sampled,
             "deviation_mm": deviation,
+            "reference": if by_carrier { "trimmed carrier" } else { "checked mesh" },
+            "surface": info.map(|info| format!("{:?}", info.surface)),
+            "checked_deviation_mm": from_checked,
+            "carrier_deviation_mm": from_carrier,
+            "checked_sag_mm": carrier.sag,
+            "sag_misses": carrier.sag_misses,
+            "vertices_off_face": off_face,
+            "vertices_without_carrier_hit": no_hit,
             "zero_area_triangles": slivers,
             "repeated_triangles": repeated,
             "folded_pairs": folded,
@@ -531,88 +588,4 @@ fn read_buffers(device: &Device, gpu: &GpuFaces) -> Result<(Vec<PreviewVertex>, 
         return Err(format!("read {} vertices of {}", vertices.len(), buffers.vertex_count));
     }
     Ok((vertices, indices))
-}
-
-/// Triangles bucketed in a grid, for the distance from a point to the nearest.
-struct Triangles {
-    triangles: Vec<[[f64; 3]; 3]>,
-    cell: f64,
-    reach: f64,
-    cells: HashMap<[i64; 3], Vec<usize>>,
-}
-
-impl Triangles {
-    fn new(triangles: impl Iterator<Item = [[f64; 3]; 3]>, tolerance: f64) -> Self {
-        let triangles: Vec<_> = triangles.collect();
-        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-        for p in triangles.iter().flatten() {
-            for i in 0..3 {
-                lo[i] = lo[i].min(p[i]);
-                hi[i] = hi[i].max(p[i]);
-            }
-        }
-        let diagonal = (0..3).map(|i| (hi[i] - lo[i]).max(0.0).powi(2)).sum::<f64>().sqrt();
-        let cell = (diagonal / 128.0).max(0.5);
-        // Look past the tolerance, so a deviation over it is measured rather than capped.
-        let reach = tolerance * 8.0;
-        let mut cells = HashMap::<_, Vec<_>>::new();
-        for (i, t) in triangles.iter().enumerate() {
-            let low: [i64; 3] =
-                std::array::from_fn(|j| ((t[0][j].min(t[1][j]).min(t[2][j]) - reach) / cell).floor() as i64);
-            let high: [i64; 3] =
-                std::array::from_fn(|j| ((t[0][j].max(t[1][j]).max(t[2][j]) + reach) / cell).floor() as i64);
-            for z in low[2]..=high[2] {
-                for y in low[1]..=high[1] {
-                    for x in low[0]..=high[0] {
-                        cells.entry([x, y, z]).or_default().push(i);
-                    }
-                }
-            }
-        }
-        Triangles { triangles, cell, reach, cells }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.triangles.is_empty()
-    }
-
-    /// The distance from `p` to the nearest triangle, or to every triangle when none is
-    /// within reach.
-    fn distance(&self, p: [f64; 3]) -> f64 {
-        let near = self
-            .cells
-            .get(&p.map(|x| (x / self.cell).floor() as i64))
-            .map(|near| near.iter().map(|&i| distance_sq(p, self.triangles[i])).fold(f64::INFINITY, f64::min))
-            .unwrap_or(f64::INFINITY);
-        if near.sqrt() <= self.reach {
-            return near.sqrt();
-        }
-        self.triangles.iter().map(|&t| distance_sq(p, t)).fold(f64::INFINITY, f64::min).sqrt()
-    }
-}
-
-fn distance_sq(p: [f64; 3], [a, b, c]: [[f64; 3]; 3]) -> f64 {
-    let sub = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] { std::array::from_fn(|i| a[i] - b[i]) };
-    let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
-    let (u, v, d) = (sub(b, a), sub(c, a), sub(p, a));
-    let (uu, uv, vv, du, dv) = (dot(u, u), dot(u, v), dot(v, v), dot(d, u), dot(d, v));
-    let det = uu * vv - uv * uv;
-    if det > 0.0 {
-        let s = (vv * du - uv * dv) / det;
-        let t = (uu * dv - uv * du) / det;
-        if s >= 0.0 && t >= 0.0 && s + t <= 1.0 {
-            let offset: [f64; 3] = std::array::from_fn(|i| d[i] - s * u[i] - t * v[i]);
-            return dot(offset, offset);
-        }
-    }
-    [(a, b), (b, c), (c, a)]
-        .into_iter()
-        .map(|(a, b)| {
-            let (u, d) = (sub(b, a), sub(p, a));
-            let len = dot(u, u);
-            let t = if len > 0.0 { (dot(u, d) / len).clamp(0.0, 1.0) } else { 0.0 };
-            let offset: [f64; 3] = std::array::from_fn(|i| d[i] - t * u[i]);
-            dot(offset, offset)
-        })
-        .fold(f64::INFINITY, f64::min)
 }

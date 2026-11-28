@@ -213,6 +213,15 @@ def fallback_faces(part):
     return [dict(face, body=body.get('body')) for body in part.get('bodies', []) for face in body.get('refused', [])]
 
 
+def carrier_faces(part):
+    """The faces judged against their trimmed carrier, with both distances and the
+    checked mesh's measured sag."""
+    keys = ('face', 'surface', 'deviation_mm', 'checked_deviation_mm', 'carrier_deviation_mm', 'checked_sag_mm',
+            'vertices_off_face', 'vertices_without_carrier_hit')
+    return [{key: face.get(key) for key in keys} for body in part.get('bodies', [])
+            for face in body.get('face_detail', []) if face.get('reference') == 'trimmed carrier']
+
+
 def native_readback(args, out, parts):
     """Runs the Metal harness over `parts`, a list of (name, path), and returns its records."""
     folder = out / 'readback'
@@ -247,6 +256,7 @@ def readback_record(part, adapter, control):
         'deviation_mm': max((body.get('deviation_mm', 0) for body in part.get('bodies', [])), default=None),
         'edges': [body.get('edges') for body in part.get('bodies', []) if body.get('edges')],
         'fallback_faces': fallback_faces(part), 'timings': timings,
+        'carrier_faces': carrier_faces(part),
         'findings': [f"{body.get('body')}: {finding}" for body in part.get('bodies', [])
                      for finding in body.get('findings', [])] + (
             [f"the checked mesh did not replace the GPU preview: {part.get('checked_missing')}"]

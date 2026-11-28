@@ -1508,6 +1508,26 @@ fn a_face_note_leader_avoids_the_hidden_middle_of_its_edge() {
 }
 
 #[test]
+fn a_new_hole_callout_needs_the_views_model_revision() {
+    let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+    let mut annotation = drawing.sheets[0]
+        .annotations
+        .iter()
+        .find(|annotation| matches!(annotation.body, AnnotationKind::HoleCallout { .. }))
+        .expect("a bracket hole callout")
+        .clone();
+    annotation.id = drawing.next_annotation_id();
+    let command = Command::AddAnnotation { annotation };
+    let before = drawing.clone();
+    assert!(matches!(apply(&mut drawing, &command), Err(soliddraft_drawing::DrawingError::NeedsModel(_))));
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "another part", Vec3::new(100.0, 30.0, 20.0));
+    let error = soliddraft_drawing::apply_with(&mut drawing, &command, &part).unwrap_err().to_string();
+    assert!(error.contains("Rebuild the view from the open part"), "{error}");
+    assert_eq!(drawing, before);
+}
+
+#[test]
 fn a_hole_table_tags_holes_at_its_views_scale_when_the_parent_is_on_another_sheet() {
     let kernel = BoxKernel::new();
     let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));

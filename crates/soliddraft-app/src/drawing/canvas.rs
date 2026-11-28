@@ -1379,6 +1379,12 @@ fn circle_tool(
     p: Point2,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    if s.tool == DrawingTool::HoleCallout
+        && let Err(error) = s.doc.check_view_part(doc, view)
+    {
+        s.say(error);
+        return;
+    }
     tools::cache_picking(s, doc, view);
     let Some(v) = s.sheet().view(view).cloned() else { return };
     let Some(c) = v.geometry.curves.get(index) else { return };

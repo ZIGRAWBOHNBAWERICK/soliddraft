@@ -73,7 +73,7 @@ fn review_value(app: &App, column: &str, value: &str) {
 }
 
 #[test]
-fn rebuilding_a_hosted_tolerance_moves_it_under_the_new_features_size() {
+fn rebuilding_keeps_the_position_and_style_of_a_moved_hosted_tolerance() {
     use soliddraft_drawing::{Annotation, Drawing, GdtCharacteristic, file, review};
 
     let root = std::env::temp_dir().join(format!("soliddraft-hosted-frame-{}", std::process::id()));
@@ -86,9 +86,7 @@ fn rebuilding_a_hosted_tolerance_moves_it_under_the_new_features_size() {
     let state = &mut app.state_mut().state;
     bracket::build(state);
     let faces = bracket::faces(state, 30.0);
-    for (name, face) in [("Bore diameter", &faces.bore), ("Boss diameter", &faces.boss)] {
-        bracket::call(state, "pmi_add", json!({"kind":"diameter", "name":name, "faces":[face]}));
-    }
+    bracket::call(state, "pmi_add", json!({"kind":"diameter", "name":"Bore diameter", "faces":[&faces.bore]}));
     bracket::call(
         state,
         "pmi_add",
@@ -104,30 +102,25 @@ fn rebuilding_a_hosted_tolerance_moves_it_under_the_new_features_size() {
     let initial = &session(&app).doc.drawing;
     let old = item(initial, "Cylindricity").clone();
     assert!(old.anchors.is_empty());
-    let boss = item(initial, "Boss diameter").clone();
     let bore = item(initial, "Bore diameter");
     assert_eq!(old.view, bore.view);
     assert!(old.placement.v < bore.placement.v);
+    let pin = initial.model.pinned.clone();
 
-    let doc = &mut app.state_mut().state.doc;
-    let mut frame = doc.model().pmi().item("Cylindricity").unwrap().clone();
-    let PmiKind::Gdt { features, .. } = &mut frame.kind else { panic!("a tolerance frame") };
-    let PmiKind::Size { features: boss_faces, .. } = &doc.model().pmi().item("Boss diameter").unwrap().kind else {
-        panic!("a diameter")
-    };
-    features.clone_from(boss_faces);
-    doc.put_pmi(frame, Some("Cylindricity".into())).unwrap();
+    let placement = soliddraft_kernel_api::Point2::new(old.placement.u + 15.0, old.placement.v + 8.0);
+    drawing(&mut app, DrawingAction::Command(Command::MoveAnnotation { annotation: old.id, to: placement }));
+    let style = soliddraft_drawing::StyleOverrides { text_height: Some(4.0), ..Default::default() };
+    let session = app.state_mut().state.drawing.session.as_mut().unwrap();
+    session.doc.drawing.annotation_mut(old.id).unwrap().style = style.clone();
     drawing(&mut app, DrawingAction::Rebuild);
     let drawing = &session(&app).doc.drawing;
     let bytes = file::to_bytes(drawing, &file::FileMeta::new("test", drawing.meta.units)).unwrap();
     let (reopened, _) = file::from_bytes(&bytes).unwrap();
     let frame = item(&reopened, "Cylindricity");
-    let host = item(&reopened, "Boss diameter");
-    assert_eq!((host.id, host.placement), (boss.id, boss.placement));
-    assert_eq!(frame.view, host.view);
+    assert_eq!(reopened.model.pinned, pin);
+    assert_eq!((frame.id, frame.view, frame.placement), (old.id, old.view, placement));
+    assert_eq!(frame.style, style);
     assert!(frame.anchors.is_empty());
-    assert_ne!(frame.placement, old.placement);
-    assert!((4.0..12.0).contains(&(host.placement.v - frame.placement.v)));
     assert!(
         matches!(&frame.body, AnnotationKind::Gdt { characteristic: GdtCharacteristic::Cylindricity, tolerance, .. } if *tolerance == 0.05)
     );

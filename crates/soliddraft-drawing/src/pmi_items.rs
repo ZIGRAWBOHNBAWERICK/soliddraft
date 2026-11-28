@@ -321,28 +321,6 @@ impl PmiView<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
-struct SizePlacement {
-    view: ViewId,
-    leg: u8,
-    at: Point2,
-    right: bool,
-}
-
-impl SizePlacement {
-    fn frame_position(self, body: &AnnotationKind, height: f64, shoulder: f64) -> Point2 {
-        let u =
-            if self.right { self.at.u + shoulder + 1.0 } else { self.at.u - shoulder - 1.0 - gdt_width(body, height) };
-        Point2::new(round(u), round(self.at.v - 1.5 * height - CLEAR))
-    }
-}
-
-#[derive(Clone, Copy)]
-enum SizeHost {
-    Planned(usize),
-    Saved(SizePlacement),
-}
-
 /// One annotation before it is on the sheet.
 struct Plan {
     source: PmiSource,
@@ -353,7 +331,7 @@ struct Plan {
     placement: Point2,
     slide: Slide,
     /// The plan this one moves with: the size a tolerance frame sits under.
-    host: Option<SizeHost>,
+    host: Option<usize>,
     /// For a stacked linear dimension: the stack it is in and its span.
     stack: Option<(u8, i8, f64)>,
     /// Its item turned out not to be drawable: nothing of it goes on the sheet.
@@ -389,7 +367,6 @@ struct Planner<'a> {
     on_edge: BTreeMap<(ViewId, EdgeId), usize>,
     /// The plan of the size on each feature, by its first face.
     sizes: BTreeMap<FaceId, usize>,
-    saved_sizes: BTreeMap<FaceId, SizePlacement>,
     /// The sides of each view that carry stacked dimensions: view, vertical, side.
     stacked: BTreeSet<(ViewId, u8, i8)>,
     /// For each view, the way that leads away from the other views: across, then up.
@@ -913,7 +890,8 @@ impl<'a> Planner<'a> {
                     _ => Err("an angle needs two planes".to_owned()),
                 };
                 let ((p, n), (q, m)) = (flat(first)?, flat(second)?);
-                let mut best: Option<((u8, i32), PmiView<'_>, [(EdgeId, bool); 2])> = None;
+                type Candidate<'view> = ((u8, i32), PmiView<'view>, [(EdgeId, bool); 2]);
+                let mut best: Option<Candidate<'_>> = None;
                 for view in self.views.iter().copied() {
                     let frame = &view.xf.frame;
                     if n.dot(frame.direction).abs() > 1e-6 || m.dot(frame.direction).abs() > 1e-6 {
@@ -1021,35 +999,23 @@ impl<'a> Planner<'a> {
                     datums: datums.clone(),
                 };
                 let th = self.text_height;
-                let host = first.first().and_then(|face| {
-                    self.sizes
-                        .get(face)
-                        .copied()
-                        .map(SizeHost::Planned)
-                        .or_else(|| self.saved_sizes.get(face).copied().map(SizeHost::Saved))
-                });
-                if let Some(host) = host {
+                if let Some(host) = first.first().and_then(|face| self.sizes.get(face)).copied() {
                     // Under the size of the same feature, starting where its text starts.
-                    let size = match host {
-                        SizeHost::Planned(i) => {
-                            let plan = &self.plans[i];
-                            SizePlacement {
-                                view: plan.view,
-                                leg: plan.leg,
-                                at: plan.placement,
-                                right: plan.slide.along.u >= 0.0,
-                            }
-                        }
-                        SizeHost::Saved(size) => size,
+                    let host_plan = &self.plans[host];
+                    let (at, right) = (host_plan.placement, host_plan.slide.along.u >= 0.0);
+                    let below = at.v - th / 2.0 - CLEAR - th;
+                    let u = if right {
+                        at.u + self.shoulder + 1.0
+                    } else {
+                        at.u - self.shoulder - 1.0 - gdt_width(&body, th)
                     };
-                    let placement = size.frame_position(&body, th, self.shoulder);
                     self.plans.push(Plan {
                         source: source.clone(),
-                        view: size.view,
-                        leg: size.leg,
+                        view: host_plan.view,
+                        leg: host_plan.leg,
                         body,
                         anchors: Vec::new(),
-                        placement,
+                        placement: Point2::new(round(u), round(below)),
                         slide: no_slide,
                         host: Some(host),
                         stack: None,
@@ -1349,44 +1315,6 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
     }
 }
 
-fn saved_sizes<'a>(
-    annotations: impl Iterator<Item = &'a Annotation>,
-    part: &Part,
-    index: &PartIndex,
-) -> BTreeMap<FaceId, SizePlacement> {
-    annotations
-        .filter_map(|annotation| {
-            if matches!(annotation.state, AnnotationState::Dangling { .. }) {
-                return None;
-            }
-            let (row, _) = annotation_row(annotation, annotation.source.as_ref()?, &part.requirements.rows)?;
-            if !row.applies() || !shows(&annotation.body, &row.item.kind) {
-                return None;
-            }
-            let item = row.on_body.as_ref()?;
-            let face = match &item.kind {
-                PmiKind::Size { features, .. } => features.first()?.first()?,
-                PmiKind::Hole { pilot, .. } => pilot.first()?,
-                _ => return None,
-            };
-            let anchor = annotation.anchors.first()?;
-            let Resolution::Found(entity) = index.resolve(&anchor.entity) else { return None };
-            if !item.features().iter().any(|faces| index.entity_on_faces(entity, faces)) {
-                return None;
-            }
-            Some((
-                *face,
-                SizePlacement {
-                    view: annotation.view,
-                    leg: anchor.entity.section_leg,
-                    at: annotation.placement,
-                    right: annotation.placement.u >= anchor.cached.u,
-                },
-            ))
-        })
-        .collect()
-}
-
 pub(crate) fn anchors_on_item(
     annotation: &Annotation,
     entities: &[Option<Entity>],
@@ -1551,11 +1479,6 @@ pub(crate) fn refresh(
     for sheet in &mut drawing.sheets {
         let style = crate::library::template(sheet.template.as_str()).style_file();
         let heading = notes_heading(sheet.template.as_str());
-        let sizes = if redraw {
-            saved_sizes(sheet.annotations.iter().filter(|a| refresh_view(a.view)), part, index)
-        } else {
-            BTreeMap::new()
-        };
         sheet.annotations.retain_mut(|annotation| {
             if !refresh_view(annotation.view) {
                 return true;
@@ -1575,20 +1498,6 @@ pub(crate) fn refresh(
                     .collect();
                 if entities.iter().any(Option::is_none) || !anchors_on_item(annotation, &entities, part, index) {
                     return false;
-                }
-                if annotation.anchors.is_empty()
-                    && matches!(annotation.body, AnnotationKind::Gdt { .. })
-                    && let Some(PmiKind::Gdt { features, .. }) =
-                        rows[item.as_str()].on_body.as_ref().map(|item| &item.kind)
-                {
-                    let host = features.first().and_then(|faces| faces.first()).and_then(|face| sizes.get(face));
-                    if !host.is_some_and(|host| {
-                        let at = host.frame_position(&annotation.body, style.text.height, style.lines.leader_shoulder);
-                        host.view == annotation.view
-                            && (at.u - annotation.placement.u).hypot(at.v - annotation.placement.v) <= 1e-5
-                    }) {
-                        return false;
-                    }
                 }
                 if let Some(body) = &body
                     && let Some(ctx) = contexts.and_then(|contexts| contexts.get(&annotation.view))
@@ -1784,16 +1693,6 @@ pub fn import(
         diagonals_taken: BTreeMap::new(),
         on_edge: BTreeMap::new(),
         sizes: BTreeMap::new(),
-        saved_sizes: saved_sizes(
-            drawing
-                .sheets
-                .get(sheet)
-                .into_iter()
-                .flat_map(|s| &s.annotations)
-                .filter(|a| candidates.iter().any(|ctx| ctx.id == a.view)),
-            part,
-            index,
-        ),
         stacked: BTreeSet::new(),
         away,
         datum_sides: BTreeMap::new(),
@@ -1860,19 +1759,14 @@ pub fn import(
             state: AnnotationState::Ok,
             source: Some(plan.source),
         });
-        if !matches!(plan.host, Some(SizeHost::Saved(_))) {
-            let host = match plan.host {
-                Some(SizeHost::Planned(i)) => ids.get(i).copied().flatten(),
-                _ => None,
-            };
-            made.push(Made {
-                id: next,
-                slide: plan.slide,
-                host,
-                hosted: plan.host.is_some(),
-                stacked: plan.stack.is_some(),
-            });
-        }
+        let host = plan.host.and_then(|host| ids.get(host).copied().flatten());
+        made.push(Made {
+            id: next,
+            slide: plan.slide,
+            host,
+            hosted: plan.host.is_some(),
+            stacked: plan.stack.is_some(),
+        });
         ids.push(Some(next));
         next = AnnotationId(next.0 + 1);
     }

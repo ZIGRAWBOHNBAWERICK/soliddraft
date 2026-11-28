@@ -256,6 +256,7 @@ fn view_glyph(painter: &egui::Painter, view: StandardView, rect: Rect, colour: C
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let doc_name = state.doc.name.clone();
     let Some(s) = state.drawing.session.as_mut() else { return };
+    s.title_draft = None;
     let mut actions: Vec<DrawingAction> = Vec::new();
     let attention = s.doc.attention_count();
     if attention > 0 {
@@ -968,18 +969,17 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             }
             section_gap(ui);
             theme::section_label(ui, "Title block");
-            let mut m = meta.clone();
             let fields = ui.id().with((s.instance, si));
-            for (key, label, value) in [
-                ("title", "Title", Some(&mut m.title)),
-                ("number", "Number", Some(&mut m.number)),
-                ("revision", "Revision", Some(&mut m.revision)),
-                ("designer", "Designer", Some(&mut m.designer)),
-                ("date", "Date", Some(&mut m.date)),
-                ("owner", "Owner", None),
-                ("status", "Status", None),
-                ("checked", "Checker", None),
-                ("approved", "Approved", None),
+            for (key, label) in [
+                ("title", "Title"),
+                ("number", "Number"),
+                ("revision", "Revision"),
+                ("designer", "Designer"),
+                ("date", "Date"),
+                ("owner", "Owner"),
+                ("status", "Status"),
+                ("checked", "Checker"),
+                ("approved", "Approved"),
             ] {
                 let Some(field) = template.title_block.fields.iter().find(|field| field.key == key) else { continue };
                 let current = display::field_value(&s.doc.drawing, si, field);
@@ -989,16 +989,26 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                         (key == "revision" && display::table_revision(&s.doc.drawing).is_some())
                             .then(|| "revision table".to_owned())
                     });
-                if let Some(text) = sheet_text_field(ui, fields, label, &current, "") {
-                    if let Some(value) = value.filter(|_| !own && inherited.is_none()) {
+                if let Some((text, focused)) = sheet_text_field(ui, fields, label, &current, "") {
+                    let mut edited = meta.clone();
+                    let value = match key {
+                        "title" => Some(&mut edited.title),
+                        "number" => Some(&mut edited.number),
+                        "revision" => Some(&mut edited.revision),
+                        "designer" => Some(&mut edited.designer),
+                        "date" => Some(&mut edited.date),
+                        _ => None,
+                    };
+                    let command = if let Some(value) = value.filter(|_| !own && inherited.is_none()) {
+                        if *value == text {
+                            continue;
+                        }
                         *value = text;
+                        Command::SetMeta { meta: edited }
                     } else {
-                        actions.push(DrawingAction::Command(Command::SetTitleField {
-                            sheet: si,
-                            key: key.into(),
-                            value: text,
-                        }));
-                    }
+                        Command::SetTitleField { sheet: si, key: key.into(), value: text }
+                    };
+                    title_edit(s, actions, command, focused);
                 }
                 if own {
                     let source = inherited.as_deref().unwrap_or("document value");
@@ -1021,16 +1031,14 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                     hint(ui, &format!("{label} from {source}"));
                 }
             }
-            if m != meta {
-                actions.push(DrawingAction::Command(Command::SetMeta { meta: m }));
-            }
             let bound = sheet.title_bindings.get("title").map_or("", String::as_str);
-            if let Some(property) = sheet_text_field(ui, fields, "Title from", bound, "part property") {
-                actions.push(DrawingAction::Command(Command::BindTitleProperty {
-                    sheet: si,
-                    key: "title".to_owned(),
-                    property: property.trim().to_owned(),
-                }));
+            if let Some((property, focused)) = sheet_text_field(ui, fields, "Title from", bound, "part property") {
+                let property = property.trim();
+                if property != bound {
+                    let command =
+                        Command::BindTitleProperty { sheet: si, key: "title".into(), property: property.into() };
+                    title_edit(s, actions, command, focused);
+                }
             }
             if !cfg!(target_arch = "wasm32") {
                 section_gap(ui);
@@ -1069,13 +1077,21 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
     });
 }
 
+fn title_edit(s: &mut DrawingSession, actions: &mut Vec<DrawingAction>, command: Command, focused: bool) {
+    if focused {
+        s.title_draft = Some(command);
+    } else {
+        actions.push(DrawingAction::Command(command));
+    }
+}
+
 fn sheet_text_field(
     ui: &mut egui::Ui,
     fields: egui::Id,
     label: &str,
     current: &str,
     hint_text: &str,
-) -> Option<String> {
+) -> Option<(String, bool)> {
     let id = fields.with(label);
     let mut text = ui
         .data(|d| d.get_temp::<(String, String)>(id))
@@ -1099,11 +1115,11 @@ fn sheet_text_field(
         })
         .inner;
     if response.has_focus() {
-        ui.data_mut(|d| d.insert_temp(id, (current.to_owned(), text)));
-        return None;
+        ui.data_mut(|d| d.insert_temp(id, (current.to_owned(), text.clone())));
+        return (text != current).then_some((text, true));
     }
     ui.data_mut(|d| d.remove::<(String, String)>(id));
-    (response.lost_focus() && text != current).then_some(text)
+    (response.lost_focus() && text != current).then_some((text, false))
 }
 
 /// The revision review of the saved drawing: what changed in the part's manufacturing
@@ -1176,7 +1192,7 @@ fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
                     egui::Label::new(egui::RichText::new(&field.label).size(12.0).color(theme::muted())).truncate(),
                 );
                 for (i, part) in ["x", "y", "width", "height"].into_iter().enumerate() {
-                    let r = ui.add(egui::DragValue::new(&mut cell[i]).speed(0.5).range(0.0..=2000.0).max_decimals(1));
+                    let r = ui.add(egui::DragValue::new(&mut cell[i]).speed(0.5).range(0.0..=2000.0).max_decimals(1).update_while_editing(true));
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("{} {part}", field.label))
                     });
@@ -1194,15 +1210,16 @@ fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
             });
             if active && !ended {
                 ui.data_mut(|d| d.insert_temp(draft, cell));
-                continue;
+            } else {
+                ui.data_mut(|d| d.remove::<[f64; 4]>(draft));
             }
-            ui.data_mut(|d| d.remove::<[f64; 4]>(draft));
-            if (ended || changed) && cell != stored {
-                actions.push(DrawingAction::Command(Command::SetTitleLayout {
+            if (active || ended || changed) && cell != stored {
+                let command = Command::SetTitleLayout {
                     sheet: si,
                     key: field.key.clone(),
                     layout: Some(soliddraft_drawing::TitleCell { cell }),
-                }));
+                };
+                title_edit(s, actions, command, active && !ended);
             }
         }
         section_gap(ui);

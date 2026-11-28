@@ -435,7 +435,7 @@ impl Command {
 /// [`Command::UpdateFromModel`] and [`Command::Reattach`] read the part and return
 /// [`DrawingError::NeedsModel`] here; run them with [`apply_with`].
 pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingError> {
-    if command.dimension_needs_model(drawing) {
+    if command.adds_hole_callout() || command.dimension_needs_model(drawing) {
         return Err(DrawingError::NeedsModel(command.name()));
     }
     match command {
@@ -909,7 +909,12 @@ impl Command {
                 | Self::SetHalfSection { .. }
                 | Self::ReattachView { .. }
                 | Self::SetViewDisplay { .. }
-        ) || self.dimension_needs_model(drawing)
+        ) || self.adds_hole_callout()
+            || self.dimension_needs_model(drawing)
+    }
+
+    fn adds_hole_callout(&self) -> bool {
+        matches!(self, Self::AddAnnotation { annotation } if matches!(annotation.body, AnnotationKind::HoleCallout { .. }))
     }
 
     /// Whether the command must measure anchors against the part before applying.
@@ -1005,6 +1010,15 @@ fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation
 pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Result<Option<UpdateReport>, DrawingError> {
     match command {
         Command::PlaceView { sheet, view } => place_view(drawing, *sheet, view, Some(&part.digest)).map(|_| None),
+        Command::AddAnnotation { annotation } if command.adds_hole_callout() => {
+            let view = drawing.view(annotation.view).ok_or(DrawingError::UnknownView(annotation.view))?;
+            if view.geometry.source_digest != part.digest.as_str() {
+                return Err(DrawingError::BadRequest(
+                    "Rebuild the view from the open part before adding a hole callout".into(),
+                ));
+            }
+            add_annotation(drawing, annotation).map(|_| None)
+        }
         Command::AddDimension { annotation } | Command::AddAnnotation { annotation }
             if command.dimension_needs_model(drawing) =>
         {

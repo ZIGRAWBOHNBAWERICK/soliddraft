@@ -682,6 +682,7 @@ pub struct DrawingSession {
     pub fold_cache: HashMap<(ViewId, FoldDirection), (View, Projected)>,
     pub drag: Option<Drag>,
     pub note_edit: Option<NoteEdit>,
+    title_draft: Option<Command>,
     pub cursor: Option<Point2>,
     pub show_grid: bool,
     pub snap: bool,
@@ -736,6 +737,7 @@ impl DrawingSession {
             fold_cache: HashMap::new(),
             drag: None,
             note_edit: None,
+            title_draft: None,
             cursor: None,
             show_grid: false,
             snap: true,
@@ -773,12 +775,20 @@ impl DrawingSession {
         self.message = Some((text.into(), Instant::now()));
     }
 
+    fn commit_title_draft(&mut self) -> Result<(), String> {
+        if let Some(command) = self.title_draft.take() {
+            self.doc.apply(command, None)?;
+        }
+        Ok(())
+    }
+
     fn show_sheet(&mut self, sheet: usize) {
         if sheet < self.doc.drawing.sheets.len() && sheet != self.sheet {
             self.sheet = sheet;
             self.needs_fit = true;
             self.selection = None;
             self.note_edit = None;
+            self.title_draft = None;
             self.sheet_rename = None;
         }
     }
@@ -1927,6 +1937,13 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::DeleteSheet(i) => {
             let Some(s) = state.drawing.session.as_mut() else { return };
+            if s.title_draft.as_ref().and_then(title_edit_sheet) == Some(i) {
+                s.title_draft = None;
+            }
+            if let Err(error) = s.commit_title_draft() {
+                s.say(error);
+                return;
+            }
             let name = s.doc.drawing.sheets.get(i).map(|sh| sh.name.clone()).unwrap_or_default();
             match s.doc.apply(Command::DeleteSheet { sheet: i }, None) {
                 Ok(()) => {
@@ -1943,6 +1960,10 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::MoveSheet { sheet, to } => {
             let Some(s) = state.drawing.session.as_mut() else { return };
+            if let Err(error) = s.commit_title_draft() {
+                s.say(error);
+                return;
+            }
             match s.doc.apply(Command::MoveSheet { sheet, to }, None) {
                 Ok(()) => {
                     if s.sheet == sheet {
@@ -2032,6 +2053,7 @@ fn after_history(s: &mut DrawingSession, sheet: Option<String>) {
     s.hover_label = None;
     s.drag = None;
     s.note_edit = None;
+    s.title_draft = None;
     s.sheet_rename = None;
     s.attention_focus = None;
 }
@@ -2174,7 +2196,7 @@ pub(crate) fn write_sheet(s: &mut DrawingSession, format: export::Format, path: 
 }
 
 /// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
-pub(crate) fn sheet_bytes(s: &DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
+pub(crate) fn sheet_bytes(s: &mut DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
     let prepared = prepare_sheets(s, matches!(format, export::Format::Pdf))?;
     let bytes = prepared.bytes(format)?;
     let mut report = prepared.report;
@@ -2204,7 +2226,8 @@ impl PreparedSheets {
     }
 }
 
-pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<PreparedSheets, String> {
+pub(crate) fn prepare_sheets(s: &mut DrawingSession, all_sheets: bool) -> Result<PreparedSheets, String> {
+    s.commit_title_draft()?;
     if !all_sheets && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
@@ -2280,6 +2303,7 @@ pub(crate) fn save_session(
     path: &Path,
     kernel: &str,
 ) -> Result<(PathBuf, Option<String>), String> {
+    s.commit_title_draft()?;
     let path = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
     let previous_path = s.doc.path.clone();
     let previous_model = s.doc.drawing.model.clone();
@@ -2309,6 +2333,15 @@ pub(crate) fn save_session(
     };
     s.doc.rebase_history_paths(previous_path.as_deref(), &previous_model);
     Ok((path, warning))
+}
+
+pub(crate) fn title_edit_sheet(command: &Command) -> Option<usize> {
+    match command {
+        Command::SetTitleField { sheet, .. }
+        | Command::BindTitleProperty { sheet, .. }
+        | Command::SetTitleLayout { sheet, .. } => Some(*sheet),
+        _ => None,
+    }
 }
 
 /// The bottom bar's status while the drawing is active: whether the sheet is up to date

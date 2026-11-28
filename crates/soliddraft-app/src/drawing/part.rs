@@ -176,6 +176,9 @@ impl Namer for PartContext<'_> {
     /// hole's circles is picked: "⌴ Ø10 ↧ 3", "⌵ Ø12 × 90°". Depths count from where the
     /// hole starts now, and a thread is called out as far as the wall still has it.
     fn hole_callout(&self, circle: &CircleInfo, projected: &Projected, symbols: &Symbols) -> Option<String> {
+        if projected.geometry.source_digest != self.digest.as_str() {
+            return None;
+        }
         let diameter = trim(format_value(circle.model_radius * 2.0, 2));
         let found = self.callout_feature(circle);
         let feature = found.and_then(|(id, _)| self.doc.feature(id));

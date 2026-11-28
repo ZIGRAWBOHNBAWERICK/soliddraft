@@ -1509,14 +1509,16 @@ pub(super) fn hole_table_tool(
         s.say("This view already has a hole table");
         return;
     }
+    if let Err(error) = s.doc.check_view_part(doc, view) {
+        s.say(error);
+        return;
+    }
     cache_picking(s, doc, view);
     let Some(projected) = s.doc.projected_of(view) else {
         s.say("Rebuild the drawing with its part before making a hole table");
         return;
     };
-    let Some(ctx) = PartContext::new(doc)
-        .filter(|part| s.model_is(part.id) && part.digest.as_str() == projected.geometry.source_digest)
-    else {
+    let Some(ctx) = PartContext::new(doc) else {
         s.say("Rebuild the drawing with its part before making a hole table");
         return;
     };

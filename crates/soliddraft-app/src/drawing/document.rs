@@ -275,6 +275,15 @@ impl DrawingDoc {
         Ok(())
     }
 
+    pub(super) fn check_view_part(&self, doc: &crate::document::Document, view: ViewId) -> Result<(), String> {
+        self.check_part(doc)?;
+        let view = self.drawing.view(view).ok_or("The view is no longer on the drawing")?;
+        if view.geometry.source_digest != super::part::digest(doc).as_str() {
+            return Err("Rebuild the view from the open part first".into());
+        }
+        Ok(())
+    }
+
     /// Applies a command, with the part when the command reads it.
     pub fn apply(&mut self, cmd: Command, part: Option<&PartContext<'_>>) -> Result<(), String> {
         let part_key = part.and_then(|p| p.doc.model().journal_key());

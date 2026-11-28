@@ -28,7 +28,15 @@ fn order_sheet_title_edits(actions: &mut Vec<AppAction>) {
     use soliddraft_drawing::Command as DrawCommand;
 
     let Some(change) = actions.iter().position(|action| {
-        matches!(action, AppAction::Drawing(DrawingAction::MoveSheet { .. } | DrawingAction::DeleteSheet(_)))
+        matches!(
+            action,
+            AppAction::Drawing(
+                DrawingAction::MoveSheet { .. }
+                    | DrawingAction::DeleteSheet(_)
+                    | DrawingAction::Save(_)
+                    | DrawingAction::Export { .. }
+            )
+        )
     }) else {
         return;
     };
@@ -40,12 +48,8 @@ fn order_sheet_title_edits(actions: &mut Vec<AppAction>) {
         })
         .collect();
     let title_sheet = |action: &AppAction| match action {
-        AppAction::Drawing(DrawingAction::Command(
-            DrawCommand::SetTitleField { sheet, .. }
-            | DrawCommand::BindTitleProperty { sheet, .. }
-            | DrawCommand::SetTitleLayout { sheet, .. },
-        )) => Some(Some(*sheet)),
         AppAction::Drawing(DrawingAction::Command(DrawCommand::SetMeta { .. })) => Some(None),
+        AppAction::Drawing(DrawingAction::Command(command)) => crate::drawing::title_edit_sheet(command).map(Some),
         _ => None,
     };
     let (edits, rest): (Vec<_>, Vec<_>) =

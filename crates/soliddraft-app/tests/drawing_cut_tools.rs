@@ -1262,6 +1262,80 @@ fn title_edits_follow_the_sheet_when_an_action_changes_its_index() {
 }
 
 #[test]
+fn hole_callouts_use_the_part_linked_to_the_drawing() {
+    let root = std::env::temp_dir().join(format!("soliddraft-hole-callout-source-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let top = view_named(&app, "Top view");
+    let before = session(&app).doc.drawing.clone();
+    let mut other = bracket();
+    assert_ne!(other.model().id(), app.state().state.doc.model().id());
+    let rim = Vec3::new(20.5, 23.0, 10.0);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::HoleCallout));
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
+    click_model(&mut app, top, rim);
+    assert_eq!(session(&app).doc.drawing, before);
+    assert!(session(&app).message.as_ref().is_some_and(|(text, _)| text.contains("not the one this drawing shows")));
+
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
+    click_model(&mut app, top, rim);
+    let callout = session(&app).doc.drawing.annotation(before.next_annotation_id()).expect("the bracket callout");
+    assert_eq!(callout.view, top);
+    let AnnotationKind::HoleCallout { text } = &callout.body else { panic!("a hole callout") };
+    assert!(text.starts_with('4') && text.ends_with("9 THRU"), "{text}");
+    let [anchor] = callout.anchors.as_slice() else { panic!("one hole anchor") };
+    let xf = view(&app, top).geometry.transform.unwrap();
+    let centre = xf.unproject(anchor.cached);
+    near(centre.x, 25.0, 1e-5, "the picked hole centre X");
+    near(centre.y, 23.0, 1e-5, "the picked hole centre Y");
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn save_and_export_commit_focused_title_edits() {
+    use soliddraft_drawing::{export::Format, file};
+
+    let root = std::env::temp_dir().join(format!("soliddraft-focused-title-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let path = root.join("bracket.dwdrw");
+    drawing(&mut app, DrawingAction::Save(Some(path.clone())));
+    drawing(&mut app, DrawingAction::SheetProperties);
+    let type_text = |app: &mut App, value: &str| {
+        app.run_steps(2);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.event(egui::Event::Text(value.into()));
+        app.run_steps(2);
+    };
+    app.get_by_label("Owner field").focus();
+    type_text(&mut app, "Rig Shop");
+    assert!(!session(&app).sheet().format_overrides.contains_key("owner"));
+    drawing(&mut app, DrawingAction::Save(None));
+    assert_eq!(file::read(&path).unwrap().0.sheets[0].format_overrides["owner"], "Rig Shop");
+    drawing(&mut app, DrawingAction::Undo);
+    assert!(!session(&app).sheet().format_overrides.contains_key("owner"));
+    drawing(&mut app, DrawingAction::Redo);
+
+    app.get_by_label("Title from field").focus();
+    type_text(&mut app, "RigReleaseNote");
+    assert!(!session(&app).sheet().title_bindings.contains_key("title"));
+    let svg = root.join("bracket.svg");
+    drawing(&mut app, DrawingAction::Export { format: Format::Svg, path: Some(svg.clone()) });
+    assert!(std::fs::read_to_string(svg).unwrap().contains("[unresolved property RigReleaseNote]"));
+
+    drawing(&mut app, DrawingAction::Select(Some(DrawingSel::Format)));
+    app.get_by_label("Legal owner width").click();
+    type_text(&mut app, "54");
+    assert!(!session(&app).sheet().title_layout.contains_key("owner"));
+    drawing(&mut app, DrawingAction::Save(None));
+    let (reopened, _) = file::read(&path).unwrap();
+    assert_eq!(reopened.sheets[0].format_overrides["owner"], "Rig Shop");
+    assert_eq!(reopened.sheets[0].title_bindings["title"], "RigReleaseNote");
+    assert_eq!(reopened.sheets[0].title_layout["owner"].cell, [0.0, 9.0, 54.0, 9.0]);
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn mixed_sheet_reference_dimensions_use_the_owning_sheets_style() {
     use soliddraft_app::drawing::document::DrawingDoc;
     let mut drawing = soliddraft_drawing::fixture::bracket_a3();

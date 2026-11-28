@@ -79,7 +79,7 @@ fn pair_proofs_pending_refused_and_late_do_not_lie() {
     let refused = doc.apply(Command::Track { name: "other".into(), source, check: None });
     kernel.rules.lock().unwrap().hold = None;
     kernel.changed.notify_all();
-    assert!(refused.unwrap_err().contains("pending"));
+    assert!(refused.unwrap_err().contains("still building"));
     settle(&mut doc);
     let r = row(&doc);
     assert_eq!(r["tracked"]["state"], "current");

@@ -181,7 +181,8 @@ pub enum Command {
         layout: Option<TitleCell>,
     },
     /// Bind a title block field to a part property; an empty property removes the
-    /// binding. The value comes from the source the drawing accepted.
+    /// binding. The value comes from the source the drawing accepted. Binding a field
+    /// clears the sheet's own value for it.
     BindTitleProperty {
         /// Index of the sheet.
         sheet: usize,
@@ -495,9 +496,8 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             Err(DrawingError::UnknownAnnotation(*annotation))
         }
         Command::FreezeAsNote { annotation } => {
-            let view = drawing.annotation(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?.view;
-            let template = drawing.sheet_of(view).or(drawing.sheets.first()).map(|s| s.template.as_str()).unwrap_or("");
-            let style = library::template(template).style_file();
+            let sheet = drawing.sheet_of_annotation(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
+            let style = library::template(sheet.template.as_str()).style_file();
             let symbols = style.symbols.clone();
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
             let text = match &a.body {
@@ -579,19 +579,16 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         }
         Command::SetTitleField { sheet, key, value } => {
             let s = sheet_mut(drawing, *sheet)?;
+            // Only a text field of the sheet's block, by its exact key, takes a value; a
+            // stale value can still be cleared.
+            let template = library::template(s.template.as_str());
+            let editable = template.title_block.fields.iter().any(|field| field.symbol.is_none() && field.key == *key);
+            if !editable && !(value.is_empty() && s.format_overrides.contains_key(key)) {
+                return Err(DrawingError::BadRequest(format!("The title block has no text field {key}")));
+            }
             if value.is_empty() {
                 s.format_overrides.remove(key);
             } else {
-                let template = library::template(s.template.as_str());
-                let editable = template.title_block.fields.iter().filter(|field| field.symbol.is_none()).any(|field| {
-                    field.key == *key
-                        || (!s.format_overrides.contains_key(&field.key)
-                            && !s.title_bindings.contains_key(&field.key)
-                            && field.value.contains(&format!("${{{key}}}")))
-                });
-                if !editable {
-                    return Err(DrawingError::BadRequest(format!("No editable title text uses {key}")));
-                }
                 s.format_overrides.insert(key.clone(), value.clone());
             }
             Ok(())
@@ -641,6 +638,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             if property.is_empty() {
                 s.title_bindings.remove(key);
             } else {
+                s.format_overrides.remove(key);
                 s.title_bindings.insert(key.clone(), property.clone());
             }
             Ok(())

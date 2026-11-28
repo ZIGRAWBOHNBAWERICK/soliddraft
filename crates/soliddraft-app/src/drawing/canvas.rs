@@ -702,7 +702,8 @@ fn hover_label(s: &DrawingSession, owner: Owner) -> Option<String> {
         }),
         Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => {
             let a = s.doc.drawing.annotation(id)?;
-            Some(layout::annotation_name(a, super::document::DrawingDoc::style(s.sheet())))
+            let owner = s.doc.drawing.sheet_of_annotation(id)?;
+            Some(layout::annotation_name(a, super::document::DrawingDoc::style(owner)))
         }
         Owner::Table(i) => match sheet.tables.get(i)?.kind {
             soliddraft_drawing::TableKind::Revision => Some("Revision table".into()),
@@ -1539,10 +1540,13 @@ fn palette(
                     ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(super::document::DrawingDoc::dimension_text(s.sheet(), d))
-                                .family(theme::semibold())
-                                .size(12.5)
-                                .color(theme::ink()),
+                            egui::RichText::new(super::document::DrawingDoc::dimension_text(
+                                s.doc.drawing.sheet_of_annotation(id).unwrap_or(s.sheet()),
+                                d,
+                            ))
+                            .family(theme::semibold())
+                            .size(12.5)
+                            .color(theme::ink()),
                         );
                         ui.separator();
                         let sym = matches!(edited.tolerance, Tolerance::Symmetric { .. });

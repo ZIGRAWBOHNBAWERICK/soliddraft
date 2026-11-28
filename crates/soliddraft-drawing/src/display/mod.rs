@@ -687,7 +687,8 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
             owner: Owner::Sheet,
         }));
         if field.symbol.as_deref() == Some("projection") {
-            projection_symbol(sheet.projection, Point2::new(cell.0 + cell.2 / 2.0, cell.1 + 3.2), lines.thin, items);
+            let (centre, scale) = projection_symbol_fit([cell.0, cell.1, cell.2, cell.3]);
+            projection_symbol(sheet.projection, centre, scale, lines.thin, items);
             continue;
         }
         let value = field_text(drawing, sheet, field, &lookup).lines().collect::<Vec<_>>().join(" ");
@@ -716,19 +717,39 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
     }
 }
 
+/// Full-size projection symbol, centrelines included: width and height in millimetres.
+const SYMBOL_SIZE: (f64, f64) = (17.0, 6.75);
+/// Space the caption takes at the top of a title cell, with a gap below it.
+const CAPTION_DEPTH: f64 = 3.2;
+/// Clearance between the projection symbol and its cell's edges.
+const SYMBOL_MARGIN: f64 = 0.3;
+/// The smallest fraction of full size the projection symbol may be drawn at.
+pub(crate) const MIN_SYMBOL_SCALE: f64 = 0.65;
+
+/// Where the projection symbol sits in a title cell `[x, y, width, height]` and its
+/// size as a fraction of full size: centred below the caption, never larger than full
+/// size, and inside the cell.
+pub(crate) fn projection_symbol_fit(cell: [f64; 4]) -> (Point2, f64) {
+    let [x, y, w, h] = cell;
+    let (bottom, top) = (y + SYMBOL_MARGIN, y + h - CAPTION_DEPTH - SYMBOL_MARGIN);
+    let scale = ((top - bottom) / SYMBOL_SIZE.1).min((w - 2.0 * SYMBOL_MARGIN) / SYMBOL_SIZE.0).min(1.0);
+    (Point2::new(x + w / 2.0, (bottom + top) / 2.0), scale)
+}
+
 /// The first or third angle projection symbol: a truncated cone seen from the side and
-/// from its small end, the end view on the side the projection angle puts it.
-fn projection_symbol(projection: Projection, centre: Point2, width: f64, items: &mut Vec<Item>) {
-    let h = 4.5;
+/// from its small end, the end view on the side the projection angle puts it. `scale`
+/// is its size as a fraction of full size.
+fn projection_symbol(projection: Projection, centre: Point2, scale: f64, width: f64, items: &mut Vec<Item>) {
+    let h = 4.5 * scale;
     let (cone_dx, circle_dx) = match projection {
-        Projection::FirstAngle => (-4.5, 4.5),
-        Projection::ThirdAngle => (4.5, -4.5),
+        Projection::FirstAngle => (-h, h),
+        Projection::ThirdAngle => (h, -h),
     };
     let c = Point2::new(centre.u + cone_dx, centre.v);
     // Frustum: small end on the side facing the circles.
     let towards = if circle_dx > 0.0 { 1.0 } else { -1.0 };
-    let x_small = c.u + towards * 3.0;
-    let x_big = c.u - towards * 3.0;
+    let x_small = c.u + towards * 3.0 * scale;
+    let x_big = c.u - towards * 3.0 * scale;
     let trapezoid = polyline(&[
         Point2::new(x_small, c.v - h * 0.3),
         Point2::new(x_big, c.v - h * 0.5),
@@ -761,7 +782,7 @@ fn projection_symbol(projection: Projection, centre: Point2, width: f64, items: 
     for (a, b) in [
         (Point2::new(k.u - ext, k.v), Point2::new(k.u + ext, k.v)),
         (Point2::new(k.u, k.v - ext), Point2::new(k.u, k.v + ext)),
-        (Point2::new(c.u - 4.0, c.v), Point2::new(c.u + 4.0, c.v)),
+        (Point2::new(c.u - 4.0 * scale, c.v), Point2::new(c.u + 4.0 * scale, c.v)),
     ] {
         items.push(Item::Path(PathItem {
             path: line(a, b),

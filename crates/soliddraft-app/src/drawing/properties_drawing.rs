@@ -969,16 +969,49 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
             theme::section_label(ui, "Title block");
             let mut m = meta.clone();
             let fields = ui.id().with((s.instance, si));
-            for (label, value) in [
-                ("Title", &mut m.title),
-                ("Number", &mut m.number),
-                ("Revision", &mut m.revision),
-                ("Designer", &mut m.designer),
-                ("Date", &mut m.date),
+            for (key, label, value) in [
+                ("title", "Title", &mut m.title),
+                ("number", "Number", &mut m.number),
+                ("revision", "Revision", &mut m.revision),
+                ("designer", "Designer", &mut m.designer),
+                ("date", "Date", &mut m.date),
             ] {
-                if let Some(text) = sheet_text_field(ui, fields, label, value, "") {
-                    *value = text;
+                // A value set on this sheet is what the sheet shows, so it is what the
+                // field edits until it is cleared.
+                let Some(own) = sheet.format_overrides.get(key) else {
+                    if let Some(text) = sheet_text_field(ui, fields, label, value, "") {
+                        *value = text;
+                    }
+                    continue;
+                };
+                if let Some(text) = sheet_text_field(ui, fields, label, own, "") {
+                    actions.push(DrawingAction::Command(Command::SetTitleField {
+                        sheet: si,
+                        key: key.into(),
+                        value: text,
+                    }));
                 }
+                ui.horizontal(|ui| {
+                    ui.add_space(72.0);
+                    let clear = ui.small_button("Use document value").on_hover_text(format!(
+                        "Set on this sheet only. Show the drawing's {} instead.",
+                        label.to_lowercase()
+                    ));
+                    clear.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            format!("{label}: use document value"),
+                        )
+                    });
+                    if clear.clicked() {
+                        actions.push(DrawingAction::Command(Command::SetTitleField {
+                            sheet: si,
+                            key: key.into(),
+                            value: String::new(),
+                        }));
+                    }
+                });
             }
             if m != meta {
                 actions.push(DrawingAction::Command(Command::SetMeta { meta: m }));

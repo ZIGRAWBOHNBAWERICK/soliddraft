@@ -29,7 +29,8 @@ pub struct Sheet {
     /// Title block values that replace the linked document properties, by field key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub format_overrides: BTreeMap<String, String>,
-    /// Title block fields that read a part property, by field key. An override still wins.
+    /// Title block fields that read a part property, by field key. Binding clears the
+    /// field's override; one set later still wins.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub title_bindings: BTreeMap<String, String>,
     /// Title block fields placed differently from the template, by field key.
@@ -107,7 +108,10 @@ impl TitleCell {
         let caption = 2.4 + crate::display::text_width(&field.label, 1.8);
         let min_width = if field.symbol.is_some() { caption.max(17.0) } else { caption };
         let min_height = (field.size + 5.0).min(height).max(6.8);
+        let symbol_fits = field.symbol.is_none()
+            || crate::display::projection_symbol_fit(self.cell).1 >= crate::display::MIN_SYMBOL_SCALE;
         [x, y, w, h].iter().all(|v| v.is_finite())
+            && symbol_fits
             && w >= min_width.min(width) - 1e-9
             && h >= min_height - 1e-9
             && x >= left - 1e-9

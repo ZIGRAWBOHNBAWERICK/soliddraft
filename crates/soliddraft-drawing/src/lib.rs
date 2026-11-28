@@ -242,6 +242,11 @@ impl Drawing {
         self.sheets.iter().find(|s| s.view(id).is_some())
     }
 
+    /// The sheet that holds annotation `id`.
+    pub fn sheet_of_annotation(&self, id: AnnotationId) -> Option<&Sheet> {
+        self.sheets.iter().find(|s| s.annotations.iter().any(|a| a.id == id))
+    }
+
     /// Annotations that changed or lost references in the last update, sheet by sheet:
     /// the content of the Needs attention panel.
     pub fn annotations_needing_attention(&self) -> impl Iterator<Item = &Annotation> {

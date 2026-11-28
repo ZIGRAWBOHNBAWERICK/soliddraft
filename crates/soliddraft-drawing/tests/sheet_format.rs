@@ -160,9 +160,117 @@ fn long_title_values_fit_their_cells_without_losing_the_saved_text() {
 fn an_override_must_affect_title_text() {
     let mut drawing = fixture::bracket_a3();
     let before = drawing.clone();
-    for key in ["owenr", "projection"] {
-        let command = Command::SetTitleField { sheet: 0, key: key.into(), value: "third-angle".into() };
-        assert!(matches!(soliddraft_drawing::apply(&mut drawing, &command), Err(DrawingError::BadRequest(_))));
+    // A typo, the projection symbol, a property no field is keyed by, and clearing a
+    // field that does not exist are all refused.
+    for (key, value) in [("owenr", "third-angle"), ("projection", "third-angle"), ("sheets", "99"), ("owenr", "")] {
+        let command = Command::SetTitleField { sheet: 0, key: key.into(), value: value.into() };
+        assert!(
+            matches!(soliddraft_drawing::apply(&mut drawing, &command), Err(DrawingError::BadRequest(_))),
+            "{key}={value}"
+        );
         assert_eq!(drawing, before);
+    }
+    // The sheet field takes its text by its own key.
+    let field = soliddraft_drawing::library::template("iso-a3").title_block.fields.iter().find(|f| f.key == "sheet");
+    let field = field.expect("the block has a sheet field");
+    assert_eq!(display::field_value(&drawing, 0, field), "1 / 1");
+    let command = Command::SetTitleField { sheet: 0, key: "sheet".into(), value: "2 / 9".into() };
+    soliddraft_drawing::apply(&mut drawing, &command).unwrap();
+    assert_eq!(display::field_value(&drawing, 0, field), "2 / 9");
+    let shown =
+        display::layout_sheet(&drawing, 0).items.iter().any(|i| matches!(i, Item::Text(t) if t.text == "2 / 9"));
+    assert!(shown, "the sheet draws the new text");
+}
+
+#[test]
+fn binding_a_title_property_replaces_the_sheet_value() {
+    let mut drawing = fixture::bracket_a3();
+    drawing.source_properties.insert("Description".into(), "Bracket arm".into());
+    let title = soliddraft_drawing::library::template("iso-a3").title_block.fields.iter().find(|f| f.key == "title");
+    let title = title.expect("the block has a title field");
+    let mut stack = UndoStack::new();
+    let set = Command::SetTitleField { sheet: 0, key: "title".into(), value: "Release".into() };
+    stack.run(&mut drawing, &set, None).unwrap();
+    assert_eq!(display::field_value(&drawing, 0, title), "Release");
+    let bind = Command::BindTitleProperty { sheet: 0, key: "title".into(), property: "Description".into() };
+    stack.run(&mut drawing, &bind, None).unwrap();
+    assert_eq!(display::field_value(&drawing, 0, title), "Bracket arm");
+    assert_eq!(drawing.sheets[0].format_overrides.get("title"), None);
+    assert_eq!(stack.undo(&mut drawing), Some("Bind title field"));
+    assert_eq!(display::field_value(&drawing, 0, title), "Release");
+}
+
+#[test]
+fn the_projection_symbol_stays_inside_its_cell_below_the_caption() {
+    use soliddraft_drawing::Projection;
+    let mut drawing = fixture::bracket_a3();
+    drawing.sheets[0].views.clear();
+    drawing.sheets[0].annotations.clear();
+    let mut stack = UndoStack::new();
+    stack.run(&mut drawing, &Command::SetSheetFormat { sheet: 0, template: TemplateId::from("ansi-e") }, None).unwrap();
+    let block = soliddraft_drawing::library::template("ansi-e");
+    let o = block.title_block_origin();
+    let field = block.title_block.fields.iter().find(|f| f.key == "projection").expect("a projection cell");
+    for layout in [None, Some(TitleCell { cell: [0.0, 0.0, 20.6, 8.5] })] {
+        let command = Command::SetTitleLayout { sheet: 0, key: "projection".into(), layout };
+        stack.run(&mut drawing, &command, None).unwrap();
+        let [x, y, w, h] = layout.map_or(field.cell, |c| c.cell);
+        for projection in [Projection::FirstAngle, Projection::ThirdAngle] {
+            stack.run(&mut drawing, &Command::SetSheetProjection { sheet: 0, projection }, None).unwrap();
+            let list = display::layout_sheet(&drawing, 0);
+            let at = list
+                .items
+                .iter()
+                .position(|i| matches!(i, Item::Text(t) if t.text == field.label))
+                .expect("the caption is drawn");
+            let Item::Text(caption) = &list.items[at] else { unreachable!() };
+            let caption_bottom = caption.pos.v - caption.height;
+            // The trapezoid, two circles and three centrelines follow the caption.
+            let parts: Vec<_> = list.items[at + 1..at + 7]
+                .iter()
+                .map(|i| match i {
+                    Item::Path(p) => kurbo::Shape::bounding_box(&p.path),
+                    _ => panic!("the symbol's line work follows its caption"),
+                })
+                .collect();
+            for b in parts {
+                let what = format!("{projection:?} in {:?}: {b:?}", [x, y, w, h]);
+                assert!(b.x0 >= o.u + x - 1e-9 && b.x1 <= o.u + x + w + 1e-9, "{what}");
+                assert!(b.y0 >= o.v + y - 1e-9 && b.y1 <= o.v + y + h + 1e-9, "{what}");
+                assert!(b.y1 < caption_bottom, "{what} reaches the caption at {caption_bottom}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_sheet_annotation_kept_as_a_note_uses_its_own_sheets_style() {
+    use soliddraft_drawing::{
+        Annotation, AnnotationId, AnnotationKind, Dimension, DimensionKind, LinearOrientation, SHEET,
+    };
+    let mut drawing = fixture::bracket_a3();
+    let mut second = drawing.sheets[0].clone();
+    second.views.clear();
+    second.annotations.clear();
+    second.tables.clear();
+    second.template = TemplateId::from("ansi-e");
+    drawing.sheets.push(second);
+    let dimension = Dimension::measured(DimensionKind::Linear { orientation: LinearOrientation::Horizontal }, 120.0, 0);
+    let note = |id: u32| Annotation {
+        id: AnnotationId(id),
+        view: SHEET,
+        body: AnnotationKind::Dimension(dimension.clone()),
+        anchors: Vec::new(),
+        placement: soliddraft_kernel_api::Point2::new(100.0, 100.0),
+        style: Default::default(),
+        state: Default::default(),
+        source: None,
+    };
+    drawing.sheets[0].annotations.push(note(900));
+    drawing.sheets[1].annotations.push(note(901));
+    for (id, text) in [(900, "120 (ref)"), (901, "(120) (ref)")] {
+        soliddraft_drawing::apply(&mut drawing, &Command::FreezeAsNote { annotation: AnnotationId(id) }).unwrap();
+        let body = &drawing.annotation(AnnotationId(id)).unwrap().body;
+        assert!(matches!(body, AnnotationKind::Note { text: t, .. } if t == text), "{id}: {body:?}");
     }
 }

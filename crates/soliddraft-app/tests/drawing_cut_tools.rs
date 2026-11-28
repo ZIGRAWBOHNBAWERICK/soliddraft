@@ -482,6 +482,49 @@ fn paper_and_title_cell_from_the_sheet_format_panel() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// A title value set on the sheet, as `--title-field` sets it, is what the sheet panel
+/// shows and edits, and the panel can clear it back to the document value.
+#[test]
+fn the_sheet_panel_edits_and_clears_a_title_value_set_on_the_sheet() {
+    let root = std::env::temp_dir().join(format!("soliddraft-title-panel-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let set = DrawCommand::SetTitleField { sheet: 0, key: "title".into(), value: "Release".into() };
+    drawing(&mut app, DrawingAction::Command(set));
+    drawing(&mut app, DrawingAction::Select(None));
+    let template = session(&app).sheet().template.clone();
+    let block = soliddraft_drawing::library::template(template.as_str());
+    let title = block.title_block.fields.iter().find(|f| f.key == "title").expect("the block has a title field");
+    let shown = |app: &App| soliddraft_drawing::display::field_value(&session(app).doc.drawing, 0, title);
+    let document_title = session(&app).doc.drawing.meta.title.clone();
+    assert_ne!(document_title, "Release");
+    assert_eq!(app.get_by_label("Title field").value().as_deref(), Some("Release"));
+
+    app.get_by_label("Title field").focus();
+    app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text("Updated".into()));
+    app.run_steps(2);
+    app.key_press(Key::Enter);
+    app.run_steps(4);
+    assert_eq!(session(&app).sheet().format_overrides["title"], "Updated");
+    assert_eq!(session(&app).doc.drawing.meta.title, document_title, "the document title stays");
+    assert_eq!(shown(&app), "Updated");
+    let list = soliddraft_drawing::display::layout_sheet(&session(&app).doc.drawing, 0);
+    let drawn =
+        list.items.iter().any(|i| matches!(i, soliddraft_drawing::display::Item::Text(t) if t.text == "Updated"));
+    assert!(drawn, "the sheet draws the edited title");
+
+    click_label(&mut app, "Title: use document value");
+    app.run_steps(2);
+    assert_eq!(session(&app).sheet().format_overrides.get("title"), None);
+    assert_eq!(shown(&app), document_title);
+    assert_eq!(app.get_by_label("Title field").value().as_deref(), Some(document_title.as_str()));
+    drawing(&mut app, DrawingAction::Undo);
+    assert_eq!(shown(&app), "Updated");
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn mixed_sheet_reference_dimensions_use_the_owning_sheets_style() {
     use soliddraft_app::drawing::document::DrawingDoc;

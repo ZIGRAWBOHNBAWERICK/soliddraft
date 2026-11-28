@@ -17,8 +17,13 @@ use std::sync::Arc;
 
 use soliddraft_kernel_api::{BodyId, Kernel, Mesh, TessellationParams, Topology, Vec3};
 use soliddraft_tessellation::{
-    Choice, DeviceBudget, DisplayCache, Level, Levels, ParamsKey, Projection, Quality, Tessellator, Thresholds,
+    Choice, DeviceBudget, DisplayCache, Level, Levels, ParamsKey, Projection, Quality, Route, Tessellator, Thresholds,
 };
+
+/// Whether the levels are checked meshes that replace a GPU preview.
+fn gpu_route() -> bool {
+    crate::viewport::gpu_preview::route_active()
+}
 
 /// How many bodies shown before the current one keep their meshes.
 pub(crate) const RECENT: usize = 4;
@@ -136,7 +141,7 @@ impl DisplayQuality {
     /// of `body`, the body [`retarget`](Self::retarget) just set. Shows it, and asks the
     /// worker for any level the cache lacks.
     pub fn reuse(&mut self, body: BodyId) -> Option<Arc<Mesh>> {
-        if self.holds_certified_spline() {
+        if self.holds_certified_spline() && !gpu_route() {
             return None;
         }
         let level = self.choice.level;
@@ -214,8 +219,14 @@ impl DisplayQuality {
         self.request_missing(body);
     }
 
+    /// Asks the worker for every level the cache lacks for `body`, the body
+    /// [`retarget`](Self::retarget) just set, while a GPU preview stands in for them.
+    pub(crate) fn request_levels(&mut self, body: BodyId) {
+        self.request_missing(body);
+    }
+
     fn request_missing(&mut self, body: BodyId) {
-        if self.holds_certified_spline() {
+        if self.holds_certified_spline() && !gpu_route() {
             self.worker.cancel(&body);
             self.asked.clear();
             return;
@@ -228,35 +239,60 @@ impl DisplayQuality {
         // The worker answers in level order; remember which levels were asked for, and
         // at which parameters, since the quality can change before the answer.
         self.asked = missing.into_iter().map(|l| (l, self.levels.key(l))).collect();
-        self.worker.request(body, body, &params);
+        let route = if gpu_route() { Route::Checked } else { Route::Preview };
+        self.worker.request_route(body, body, &params, route);
+    }
+
+    fn absorb(&mut self, body: BodyId, done: soliddraft_tessellation::Done<BodyId>) {
+        if done.key != body {
+            return;
+        }
+        match done.result {
+            Ok(meshes) => {
+                for ((level, key), mesh) in self.asked.clone().into_iter().zip(meshes) {
+                    self.cache.insert(body, level, key, mesh);
+                }
+            }
+            Err(e) => {
+                log::warn!("tessellating body {body:?}: {e}");
+                if let Some(choice) = self.curved_surfaces
+                    && self.asked.iter().all(|(level, key)| self.levels.key(*level) == *key)
+                {
+                    self.error = Some(format!("Curved surfaces ({}) could not be displayed: {e}", choice.label()));
+                }
+            }
+        }
+    }
+
+    /// Waits up to `timeout` for the mesh of the wanted level, while a GPU preview stands
+    /// in for it, and shows it. For hosts without frames, such as the MCP server.
+    pub fn wait_wanted(&mut self, timeout: std::time::Duration) -> Option<(Level, Arc<Mesh>)> {
+        let body = self.body?;
+        let wanted = (self.choice.level, self.levels.key(self.choice.level));
+        let deadline = web_time::Instant::now() + timeout;
+        loop {
+            if let Some(mesh) = self.cache.get(&body, wanted.1) {
+                self.shown = Some(wanted);
+                return Some((wanted.0, mesh));
+            }
+            if self.worker.pending() == 0 {
+                return None;
+            }
+            let left = deadline.checked_duration_since(web_time::Instant::now())?;
+            let done = self.worker.wait(left)?;
+            self.absorb(body, done);
+        }
     }
 
     /// Takes the worker's answers and moves the level choice on by one frame. Returns
     /// the mesh to show and its level when the shown mesh should change.
     pub fn update(&mut self, projection: &Projection, dt_s: f32) -> Option<(Level, Arc<Mesh>)> {
         let body = self.body?;
-        if self.holds_certified_spline() {
+        if self.holds_certified_spline() && !gpu_route() {
             return None;
         }
         for done in self.worker.poll() {
-            if done.key != body {
-                continue;
-            }
-            match done.result {
-                Ok(meshes) => {
-                    for ((level, key), mesh) in self.asked.clone().into_iter().zip(meshes) {
-                        self.cache.insert(body, level, key, mesh);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("tessellating body {body:?}: {e}");
-                    if let Some(choice) = self.curved_surfaces
-                        && self.asked.iter().all(|(level, key)| self.levels.key(*level) == *key)
-                    {
-                        self.error = Some(format!("Curved surfaces ({}) could not be displayed: {e}", choice.label()));
-                    }
-                }
-            }
+            self.absorb(body, done);
         }
         self.cache.tick();
         let pixels_per_mm = projection.pixels_per_mm(self.center, self.radius);

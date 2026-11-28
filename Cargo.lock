@@ -918,6 +918,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "catallax-preview"
+version = "0.5.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=e15c27e19bab4a2f341682138e7c9ab3be3b181e#e15c27e19bab4a2f341682138e7c9ab3be3b181e"
+dependencies = [
+ "bytemuck",
+ "catallax-mesh",
+ "catallax-topology",
+ "spade",
+ "wgpu",
+]
+
+[[package]]
 name = "catallax-recipe"
 version = "0.5.0"
 source = "git+https://github.com/BohnBawerick/catallax?rev=e15c27e19bab4a2f341682138e7c9ab3be3b181e#e15c27e19bab4a2f341682138e7c9ab3be3b181e"
@@ -5525,6 +5537,7 @@ dependencies = [
  "catallax-measure",
  "catallax-mesh",
  "catallax-numbers",
+ "catallax-preview",
  "catallax-recipe",
  "catallax-shapes",
  "catallax-step",
@@ -5536,6 +5549,7 @@ dependencies = [
  "soliddraft-kernel-api",
  "soliddraft-model",
  "soliddraft-recipe",
+ "wgpu",
 ]
 
 [[package]]

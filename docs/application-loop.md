@@ -283,6 +283,11 @@ MCP tool call has a numbered directory under `commands/` containing:
   viewport's `ViewportRenderer`, shader and camera, without reopening saved input.
   `viewport.json` records the retained GPU adapter. `display.json` identifies the
   live viewport and backend; `display.kernel.json` retains only its capture calls.
+  Where the renderer installed the GPU preview, `display.gpu.json` records the
+  adapter's device type, the GPU preview's status, the GPU previews shown and the CPU
+  previews the viewport asked for. It stays out of `display.json` and the
+  `scenario_display` answer because it describes the machine, not the document, and
+  paired runs compare answers byte for byte.
   The separate bundle-only `scenario_view` request writes `view.svg`, `view.json`
   and `view.kernel.json` from the same live body, without reopening saved input.
   Its external wait, phase split and work are in `view.timing.json` and the step's

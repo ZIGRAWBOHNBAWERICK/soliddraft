@@ -170,6 +170,16 @@ impl<'a> Evidence<'a> {
             "bodies_placed":bodies_placed,
         });
         write_json(dir.join("display.json"), &result)?;
+        // How this machine delivered the display stays out of display.json and the answer:
+        // it depends on the adapter, not the document, and paired runs compare answers.
+        // Only a capture whose renderer installed the GPU preview has this record.
+        if soliddraft_app::viewport::gpu_preview::active().is_some() {
+            let mut delivery = soliddraft_app::viewport::gpu_preview::counts();
+            delivery["request"] = json!(self.sequence);
+            delivery["revision"] = json!(doc.revision());
+            delivery["adapter"] = self.renderer.as_ref().map_or(Value::Null, |r| r.adapter.clone());
+            write_json(dir.join("display.gpu.json"), &delivery)?;
+        }
         Ok(result)
     }
 

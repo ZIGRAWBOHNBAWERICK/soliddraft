@@ -11,7 +11,10 @@ use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
 use part_display::PartDisplay;
-pub(crate) use part_display::{ReadyDisplay, ready_display};
+pub(crate) use part_display::{ReadyDisplay, ready_display, ready_fallback, ready_preview};
+// The browser's page meshes the GPU preview of a part its kernel worker rebuilt.
+#[cfg(target_arch = "wasm32")]
+pub(crate) use part_display::{PreviewTarget, preview_display, preview_target};
 use serde::{Deserialize, Serialize};
 use soliddraft_document::{ContentHash, DocumentId};
 use soliddraft_kernel_api::{
@@ -1673,13 +1676,9 @@ impl Feature {
         }
     }
 
-    /// A field's accuracy, called an unproved preview only while the screen draws one: a
-    /// refused, suppressed or rolled-back field shows no preview.
+    /// A field's accuracy. Nothing about checking the display shows to the user.
     fn field_summary(&self, accuracy_mm: f64) -> String {
-        match self.status {
-            FeatureStatus::Ok | FeatureStatus::Pending => format!("unproved preview · ±{} mm", fmt_mm(accuracy_mm)),
-            _ => format!("±{} mm", fmt_mm(accuracy_mm)),
-        }
+        format!("±{} mm", fmt_mm(accuracy_mm))
     }
 
     pub fn is_sketch(&self) -> bool {
@@ -1771,6 +1770,9 @@ pub struct DisplayMesh {
     /// Line segments (pairs of points) per B-rep edge, with the edge's pick id.
     pub edges: Vec<DisplayEdge>,
     pub corners: Vec<DisplayCorner>,
+    /// The faces a GPU preview draws from buffers on the renderer's device. The CPU
+    /// arrays above then hold only the faces the GPU mesher refused.
+    pub gpu: Option<crate::viewport::gpu_preview::GpuFaces>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1791,9 +1793,16 @@ impl DisplayMesh {
     }
 
     pub fn bounds(&self) -> Option<(Vec3, Vec3)> {
+        let gpu = self.gpu.as_ref().map(|gpu| gpu.bounds);
         let mut it = self.positions.iter();
-        let first = *it.next()?;
-        Some(it.fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p))))
+        let Some(first) = it.next().copied() else { return gpu };
+        let cpu = it.fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        Some(gpu.map_or(cpu, |(lo, hi)| (lo.min(cpu.0), hi.max(cpu.1))))
+    }
+
+    /// Whether this is a GPU preview, with faces that have no CPU triangles.
+    pub fn is_gpu_preview(&self) -> bool {
+        self.gpu.is_some()
     }
 }
 
@@ -2040,20 +2049,29 @@ pub(crate) enum CandidateDisplay {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Construction(Arc<ConstructionView>),
     Proved(Arc<ReadyDisplay>),
+    /// The rebuilt part's GPU preview, shown until its checked display arrives.
+    Preview(Arc<ReadyDisplay>),
 }
 
 impl CandidateDisplay {
     pub(crate) fn mesh(&self) -> Arc<DisplayMesh> {
         match self {
             Self::Construction(view) => view.mesh.clone(),
-            Self::Proved(view) => view.mesh.clone(),
+            Self::Proved(view) | Self::Preview(view) => view.mesh.clone(),
         }
+    }
+
+    /// Whether this display may replace `shown`, an earlier display of the same request.
+    /// The rebuilt part's GPU preview stays over the construction display that the
+    /// construction worker may finish after it.
+    pub(crate) fn replaces(&self, shown: &CandidateDisplay) -> bool {
+        !(matches!(self, Self::Construction(_)) && matches!(shown, Self::Preview(_)))
     }
 
     fn picks(&self) -> &[PickEntry] {
         match self {
             Self::Construction(view) => &view.picks,
-            Self::Proved(view) => &view.part.picks,
+            Self::Proved(view) | Self::Preview(view) => &view.part.picks,
         }
     }
 
@@ -2064,7 +2082,7 @@ impl CandidateDisplay {
                 .iter()
                 .find(|face| face.id == id)
                 .map(|face| (face.feature, face.label.as_str(), face.origins.as_slice())),
-            Self::Proved(view) => {
+            Self::Proved(view) | Self::Preview(view) => {
                 let face = view.part.faces.iter().find(|face| face.id == id)?;
                 Some((
                     face.feature,
@@ -2320,6 +2338,9 @@ pub struct Document {
     repaint: Option<egui::Context>,
     pending: Option<PendingBuild>,
     provisional: Option<ProvisionalShown>,
+    /// The browser's GPU preview of the shown body, while its device meshes it. Its
+    /// checked levels are asked for once it is on screen.
+    gpu_pending: Option<(BodyId, crate::viewport::gpu_preview::Pending)>,
     proof_failure: Option<String>,
     proof_notice: Option<String>,
     /// Why the current body has no display mesh, or why the last change was rolled back
@@ -2385,6 +2406,7 @@ impl Document {
             repaint: None,
             pending: None,
             provisional: None,
+            gpu_pending: None,
             proof_failure: None,
             proof_notice: None,
             display_failure: None,
@@ -2445,6 +2467,7 @@ impl Document {
             repaint: self.repaint.clone(),
             pending: None,
             provisional: None,
+            gpu_pending: None,
             proof_failure: self.proof_failure.clone(),
             proof_notice: None,
             display_failure: None,
@@ -2872,6 +2895,7 @@ impl Document {
             params: self.tess_params,
             level: self.quality.wanted(),
             curved_surfaces: self.quality.curved_surfaces(),
+            gpu: crate::viewport::gpu_preview::active(),
         }
     }
 
@@ -2907,7 +2931,10 @@ impl Document {
             return;
         }
         match answer.kind {
-            crate::drag::AnswerKind::Construction(Ok(display)) if pending.completed.is_none() => {
+            crate::drag::AnswerKind::Construction(Ok(display))
+                if pending.completed.is_none()
+                    && pending.candidate.as_ref().is_none_or(|shown| display.replaces(shown)) =>
+            {
                 pending.candidate = Some(display);
             }
             crate::drag::AnswerKind::Construction(_) => {}
@@ -2927,7 +2954,11 @@ impl Document {
             let token = ViewToken { revision: pending.revision, request: pending.request, transient: false };
             match answer.kind {
                 crate::drag::AnswerKind::Construction(Ok(display)) => {
-                    self.pending.as_mut().expect("matched pending revision").candidate = Some(display.clone());
+                    let pending = self.pending.as_mut().expect("matched pending revision");
+                    if pending.candidate.as_ref().is_some_and(|shown| !display.replaces(shown)) {
+                        continue;
+                    }
+                    pending.candidate = Some(display.clone());
                     self.show_provisional(token, display);
                 }
                 crate::drag::AnswerKind::Construction(Err(message)) => self.proof_notice = Some(message),
@@ -2962,7 +2993,9 @@ impl Document {
         if token.revision != self.revision {
             return;
         }
-        if self.provisional.as_ref().is_some_and(|shown| shown.token.transient && !token.transient) {
+        if self.provisional.as_ref().is_some_and(|shown| {
+            (shown.token.transient && !token.transient) || (shown.token == token && !display.replaces(&shown.display))
+        }) {
             return;
         }
         let selected = self.provisional_selection();
@@ -3030,7 +3063,7 @@ impl Document {
             }
             return Ok(());
         }
-        if let Some(display) = &proof.display {
+        if let Some(display) = proof.display.as_ref().filter(|_| proof.checked) {
             for body in display.part.meshes.keys() {
                 self.capture_display_bound(*body)?;
             }
@@ -3041,7 +3074,10 @@ impl Document {
             let ReadyDisplay { part, topology, kernel_mesh, .. } =
                 Arc::try_unwrap(display).unwrap_or_else(|display| (*display).clone());
             let wanted = self.quality.retarget(part.body, &topology, &self.model.settings().viewport);
-            if wanted == part.params {
+            if !proof.checked {
+                // The preview stays: its checked display failed, and asking again
+                // would fail again.
+            } else if wanted == part.params {
                 self.quality.made(part.body, kernel_mesh);
             } else {
                 self.quality.set_quality(&self.model.settings().viewport);
@@ -3241,8 +3277,9 @@ impl Document {
         self.features.iter().filter(|f| matches!(f.status, FeatureStatus::NeedsRepair(_))).count()
     }
 
+    /// The triangles on screen, a GPU preview's included.
     pub fn triangle_count(&self) -> usize {
-        self.meshes.values().map(|m| m.triangle_count()).sum()
+        self.meshes.values().map(|m| m.triangle_count() + m.gpu.as_ref().map_or(0, |gpu| gpu.triangle_count())).sum()
     }
 
     /// The feature that consumes a sketch, if any.
@@ -3434,8 +3471,20 @@ impl Document {
     }
 
     /// Publishes a display made of every live body, or records why there is none. A
-    /// headless document keeps its names and picks and draws nothing.
-    fn publish_ready(&mut self, ready: Result<Option<ReadyDisplay>, String>) {
+    /// headless document keeps its names and picks and draws nothing. When the checked
+    /// display failed, `fallback` makes the bodies' previews: a built body is always drawn.
+    fn publish_ready(
+        &mut self,
+        ready: Result<Option<ReadyDisplay>, String>,
+        fallback: impl FnOnce() -> Result<Option<ReadyDisplay>, String>,
+    ) {
+        let ready = ready.or_else(|error| match fallback() {
+            Ok(Some(display)) => {
+                log::warn!("the checked display failed; the preview stays: {error}");
+                Ok(Some(display))
+            }
+            _ => Err(error),
+        });
         match ready {
             Ok(Some(mut display)) => {
                 if self.headless {
@@ -4370,14 +4419,16 @@ impl Document {
     /// Shows a new body at the requested level. Unchanged bodies keep their display
     /// geometry and GPU buffers; undo and redo restore recent bodies' meshes and picks.
     fn refresh_display(&mut self) {
+        self.gpu_pending = None;
         if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
             && let Some(proved) = &self.last_proved
             && proved.model.next_body() > 1
             && proved.model.live_bodies().len() > 1
         {
-            let ready =
-                ready_display(&proved.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
-            self.publish_ready(ready);
+            let (level, curved) = (soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
+            let model = proved.model.clone();
+            let ready = ready_display(&model, level, curved);
+            self.publish_ready(ready, || ready_fallback(&model, level, curved));
             return;
         }
         if self.model.next_body() > 1
@@ -4472,14 +4523,19 @@ impl Document {
                 self.show_mesh(body, &topology, &mesh);
                 self.shown = next;
             } else {
-                match self.kernel().rendering(body, &self.tess_params) {
-                    Ok(mesh) => {
-                        self.show_mesh(body, &topology, &mesh);
-                        self.quality.made(body, mesh);
-                        self.shown = next;
+                let pending = crate::viewport::gpu_preview::start(self.kernel().clone(), body, self.tess_params);
+                match pending.as_ref().map(|pending| pending.take()) {
+                    // The display worker makes the checked levels; the first to arrive at
+                    // the wanted level replaces this preview.
+                    Some(Some(Some(meshing))) => {
+                        self.show_gpu_preview(body, &topology, meshing);
+                        self.quality.request_levels(body);
                     }
-                    Err(error) => self.display_failure = Some(display_unavailable(error.to_string())),
+                    // The browser's device answers after this frame.
+                    Some(None) => self.gpu_pending = pending.map(|pending| (body, pending)),
+                    _ => self.show_screen_mesh(body, &topology),
                 }
+                self.shown = next;
             }
         } else {
             self.quality.clear();
@@ -4515,9 +4571,11 @@ impl Document {
             }
             return;
         }
-        let ready =
-            ready_display(&self.model, soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
-        self.publish_ready(ready);
+        let (level, curved) = (soliddraft_tessellation::Level::Standard, self.quality.curved_surfaces());
+        let ready = ready_display(&self.model, level, curved);
+        let model = &self.model;
+        let fallback = ready.is_err().then(|| ready_fallback(model, level, curved));
+        self.publish_ready(ready, || fallback.unwrap_or(Ok(None)));
     }
 
     /// Starts the next additive feature in a separate body.
@@ -4913,7 +4971,20 @@ impl Document {
             None => self.model.appearance_table(configuration),
         };
         let table: Vec<Shading> = resolved.appearances.iter().map(Appearance::shading).collect();
+        let wanted_of = |pick: u32| match self.picks.get((pick as usize).wrapping_sub(1)) {
+            Some(PickEntry::Face(_, face)) => resolved.faces.get(face).copied().unwrap_or(0),
+            _ => 0,
+        };
         for mesh in self.meshes.values_mut() {
+            if let Some(gpu) = &mesh.gpu
+                && gpu.faces.iter().any(|face| face.appearance != wanted_of(face.pick))
+            {
+                let m = Arc::make_mut(mesh);
+                for face in &mut m.gpu.as_mut().expect("a GPU preview").faces {
+                    face.appearance = wanted_of(face.pick);
+                }
+                m.appearances = table.clone();
+            }
             if mesh.appearances == table
                 && mesh.face_picks.iter().zip(&mesh.face_appearances).all(|(&pick, &appearance)| {
                     let wanted = match self.picks.get((pick as usize).wrapping_sub(1)) {
@@ -4939,6 +5010,62 @@ impl Document {
         }
     }
 
+    /// Shows `body`'s screen mesh. A built body is always drawn: its CPU preview stays
+    /// when its checked mesh fails, and the reason goes to the log only.
+    fn show_screen_mesh(&mut self, body: BodyId, topology: &Topology) {
+        match screen_mesh(self.kernel().as_ref(), body, &self.tess_params) {
+            Ok(mesh) => {
+                self.show_mesh(body, topology, &mesh);
+                self.quality.made(body, mesh);
+            }
+            Err(error) => {
+                crate::viewport::gpu_preview::note_cpu_preview(body);
+                match self.kernel().preview(body, &self.tess_params) {
+                    Ok(mesh) => {
+                        log::warn!("the checked mesh of {body:?} failed; its preview stays: {error}");
+                        self.show_mesh(body, topology, &mesh);
+                    }
+                    Err(_) => self.display_failure = Some(display_unavailable(error.to_string())),
+                }
+            }
+        }
+    }
+
+    /// Shows the browser's GPU preview once its device has meshed it, and asks for the
+    /// checked levels that replace it. One the device failed falls back to the screen
+    /// mesh. Returns whether the display changed.
+    fn land_gpu_preview(&mut self) -> bool {
+        let Some((body, pending)) = &self.gpu_pending else { return false };
+        let body = *body;
+        let Some(meshed) = pending.take() else { return false };
+        self.gpu_pending = None;
+        if self.display_body() != Some(body) {
+            return false;
+        }
+        let Ok(topology) = self.kernel().topology(body) else { return false };
+        match meshed {
+            Some(meshing) => {
+                self.show_gpu_preview(body, &topology, meshing);
+                self.quality.request_levels(body);
+            }
+            None => self.show_screen_mesh(body, &topology),
+        }
+        self.mesh_version += 1;
+        true
+    }
+
+    /// Makes a GPU preview the displayed body's display mesh, with its picks, until the
+    /// display worker's checked mesh replaces it.
+    fn show_gpu_preview(&mut self, body: BodyId, topology: &Topology, meshing: crate::viewport::gpu_preview::Meshing) {
+        let mut picks = Vec::new();
+        let feature = self.features.iter().rev().find(|f| f.body == Some(body)).map_or(0, |f| f.id);
+        let makers: HashMap<FaceId, FeatureId> = self.faces.iter().map(|f| (f.id, f.feature)).collect();
+        let mesh = gpu_display_mesh(feature, body, meshing, topology, &makers, &mut picks);
+        self.meshes = HashMap::from([(body, Arc::new(mesh))]);
+        self.picks = picks;
+        self.apply_appearances();
+    }
+
     /// Makes `mesh` the displayed body's display mesh and its picks.
     fn show_mesh(&mut self, body: BodyId, topology: &Topology, mesh: &Mesh) {
         let mut picks = Vec::new();
@@ -4949,6 +5076,21 @@ impl Document {
             HashMap::from([(body, Arc::new(display_mesh(feature, mesh, &edges, topology, &makers, &mut picks)))]);
         self.picks = picks;
         self.apply_appearances();
+    }
+
+    /// Waits for the checked mesh of a GPU preview on screen and shows it, for hosts
+    /// that draw no frames, such as the MCP server. The window's frames take it through
+    /// [`update_display`](Self::update_display) instead.
+    pub fn finish_display(&mut self) {
+        if self.provisional.is_some() || !self.meshes.values().any(|mesh| mesh.gpu.is_some()) {
+            return;
+        }
+        let Some((level, mesh)) = self.quality.wait_wanted(std::time::Duration::from_secs(600)) else { return };
+        let Some(body) = self.display_body() else { return };
+        let Ok(topology) = self.kernel().topology(body) else { return };
+        self.tess_params = *self.quality.levels().params(level);
+        self.show_mesh(body, &topology, &mesh);
+        self.mesh_version += 1;
     }
 
     /// Moves the display level on by one frame of `dt_s` seconds under `projection`,
@@ -4964,6 +5106,9 @@ impl Document {
             || self.proof_failure.is_some()
         {
             return false;
+        }
+        if self.gpu_pending.is_some() {
+            return self.land_gpu_preview() || self.gpu_pending.is_some();
         }
         let Some((level, mesh)) = self.quality.update(projection, dt_s) else {
             return self.quality.pending();
@@ -6496,6 +6641,11 @@ fn draft_guides(
 pub const PREVIEW_MADE: u32 = u32::MAX;
 
 /// A preview mesh whose faces in `made` carry their marks in `face_features`.
+///
+/// Tool and section previews stay on the CPU preview, with or without the GPU preview.
+/// The code around them reads their triangles (the depth arrow, the section cap's tint,
+/// the dimension anchors), no checked mesh ever replaces them, and some bodies they show
+/// are released as soon as they are meshed, so the kernel cannot answer picks on them.
 fn preview_mesh_marked(
     kernel: &dyn Kernel,
     body: BodyId,
@@ -6503,19 +6653,72 @@ fn preview_mesh_marked(
     made: &HashMap<FaceId, FeatureId>,
 ) -> Result<Arc<DisplayMesh>, String> {
     let topology = kernel.topology(body).map_err(|e| e.to_string())?;
-    let mesh = kernel.rendering(body, params).map_err(|e| e.to_string())?;
-    let edges = edge_polylines(kernel, body, params);
     let mut picks = Vec::new();
+    let mesh = kernel.rendering(body, params).map_err(|e| e.to_string())?;
+    let edges = kernel.rendering_edges(body, params).unwrap_or_else(|e| {
+        log::warn!("edges of body {body:?}: {e}");
+        Vec::new()
+    });
     Ok(Arc::new(display_mesh(0, &mesh, &edges, &topology, made, &mut picks)))
 }
 
 /// The body's edges sampled along their curves. A kernel that cannot sample them
 /// leaves the body without edges rather than without faces.
 fn edge_polylines(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams) -> Vec<EdgePolyline> {
-    kernel.rendering_edges(body, params).unwrap_or_else(|e| {
+    let edges = if crate::viewport::gpu_preview::route_active() {
+        kernel.checked_rendering_edges(body, params)
+    } else {
+        kernel.rendering_edges(body, params)
+    };
+    edges.unwrap_or_else(|e| {
         log::warn!("edges of body {body:?}: {e}");
         Vec::new()
     })
+}
+
+/// The mesh the screen ends on: the checked mesh after a GPU preview, or the kernel's
+/// own rendering where the CPU preview is the display.
+fn screen_mesh(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    params: &TessellationParams,
+) -> soliddraft_kernel_api::KernelResult<Mesh> {
+    if crate::viewport::gpu_preview::route_active() {
+        kernel.checked_rendering(body, params)
+    } else {
+        crate::viewport::gpu_preview::note_cpu_preview(body);
+        kernel.rendering(body, params)
+    }
+}
+
+/// The display mesh of a body's GPU preview: the GPU's faces in buffers on the
+/// renderer's device, the faces it refused from the CPU preview, and edges and corners
+/// from the description and the topology, numbered as [`display_mesh`] numbers them.
+fn gpu_display_mesh(
+    feature: FeatureId,
+    body: BodyId,
+    meshing: crate::viewport::gpu_preview::Meshing,
+    topology: &Topology,
+    makers: &HashMap<FaceId, FeatureId>,
+    picks: &mut Vec<PickEntry>,
+) -> DisplayMesh {
+    let crate::viewport::gpu_preview::Meshing { preview, meshed, refused, device } = meshing;
+    crate::viewport::gpu_preview::note_shown(body);
+    let first = picks.len();
+    let mut out = display_mesh(feature, &refused, &preview.edges, topology, makers, picks);
+    let face_picks: HashMap<FaceId, u32> = picks
+        .iter()
+        .enumerate()
+        .skip(first)
+        .filter_map(|(i, pick)| match pick {
+            PickEntry::Face(_, face) => Some((*face, i as u32 + 1)),
+            _ => None,
+        })
+        .collect();
+    let bounds = (kv(topology.bbox.min), kv(topology.bbox.max));
+    let maker = |face: FaceId| makers.get(&face).map_or(0, |feature| *feature as u32);
+    out.gpu = Some(crate::viewport::gpu_preview::faces(body, meshed, device, &face_picks, maker, bounds));
+    out
 }
 
 fn display_faces(mesh: &Mesh, face_picks: &HashMap<FaceId, u32>, makers: &HashMap<FaceId, FeatureId>) -> DisplayMesh {

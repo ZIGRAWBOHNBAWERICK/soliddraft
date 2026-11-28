@@ -832,6 +832,8 @@ pub struct ViewportRenderer {
     frame: u64,
     assembly: AssemblyRenderer,
     part_view: Option<wgpu::Buffer>,
+    /// Turns GPU previews into face vertices; compiled when the first one arrives.
+    gpu_convert: std::sync::OnceLock<super::gpu_preview::Convert>,
 }
 
 fn picture_view(
@@ -1513,6 +1515,7 @@ impl ViewportRenderer {
             frame: 0,
             assembly,
             part_view,
+            gpu_convert: std::sync::OnceLock::new(),
         }
     }
 
@@ -1622,7 +1625,7 @@ impl ViewportRenderer {
         });
     }
 
-    fn upload_body(&self, device: &wgpu::Device, mesh: &DisplayMesh, flags: u32) -> GpuBody {
+    fn upload_body(&self, device: &wgpu::Device, queue: &wgpu::Queue, mesh: &DisplayMesh, flags: u32) -> GpuBody {
         let table = mesh.appearances.len().min(MAX_APPEARANCES);
         if mesh.appearances.len() > MAX_APPEARANCES {
             log::warn!("a body shows {} appearances; the first {MAX_APPEARANCES} are drawn", mesh.appearances.len());
@@ -1640,7 +1643,13 @@ impl ViewportRenderer {
         for (slot, s) in shades.iter_mut().zip(&mesh.appearances) {
             *slot = (*s).into();
         }
-        let see_through = verts.iter().any(|v| shades[v.appearance as usize].base[3] < OPAQUE);
+        let see_through = verts.iter().any(|v| shades[v.appearance as usize].base[3] < OPAQUE)
+            || mesh.gpu.as_ref().is_some_and(|gpu| {
+                gpu.faces.iter().filter(|face| face.drawn).any(|face| {
+                    let appearance = if (face.appearance as usize) < table { face.appearance as usize } else { 0 };
+                    shades[appearance].base[3] < OPAQUE
+                })
+            });
         let mut lines: Vec<LineInstance> = Vec::new();
         for e in &mesh.edges {
             lines.extend(e.segments.as_chunks::<2>().0.iter().map(|s| LineInstance {
@@ -1678,6 +1687,39 @@ impl ViewportRenderer {
             layout: &self.layouts.body,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
         });
+        if let Some(gpu) = &mesh.gpu
+            && gpu.device != *device
+        {
+            log::warn!("a GPU preview made on another device is not drawn here; its CPU faces are");
+        }
+        if let Some(gpu) = mesh.gpu.as_ref().filter(|gpu| gpu.device == *device) {
+            // A GPU preview: the mesher's buffers become face vertices on the GPU, with
+            // the CPU preview's faces the mesher refused after them. No part culling:
+            // the CPU has no face bounds for the GPU faces.
+            let convert = self.gpu_convert.get_or_init(|| super::gpu_preview::Convert::new(device));
+            let cpu = super::gpu_preview::CpuPart {
+                vertices: bytemuck::cast_slice(&verts),
+                indices: &mesh.indices,
+                silhouettes: bytemuck::cast_slice(&silhouettes),
+            };
+            let converted = convert.run(device, queue, gpu, table, cpu);
+            return GpuBody {
+                vertices: converted.vertices,
+                indices: converted.indices,
+                index_count: converted.index_count,
+                cull: None,
+                lines: make("edges", bytemuck::cast_slice(&lines), wgpu::BufferUsages::VERTEX),
+                line_count: lines.len() as u32,
+                silhouettes: (converted.silhouette_count > 0)
+                    .then_some((converted.silhouettes, converted.silhouette_count)),
+                points: make("points", bytemuck::cast_slice(&points), wgpu::BufferUsages::VERTEX),
+                point_count: points.len() as u32,
+                uniform,
+                bind_group,
+                bounds: mesh.bounds(),
+                see_through,
+            };
+        }
         let cull = self
             .assembly
             .part_cull_pipeline
@@ -1764,7 +1806,7 @@ impl ViewportRenderer {
             || self.bodies.len() != meshes.len()
             || meshes.iter().any(|(id, _)| !self.bodies.contains_key(id))
         {
-            self.bodies = meshes.iter().map(|(id, m)| (*id, self.upload_body(device, m, 0))).collect();
+            self.bodies = meshes.iter().map(|(id, m)| (*id, self.upload_body(device, queue, m, 0))).collect();
             self.mesh_version = *version;
         }
         match &input.ghost {
@@ -1773,7 +1815,7 @@ impl ViewportRenderer {
                 let tint = if *removes { input.controls.red_removal } else { input.controls.tint_preview };
                 let flags = 2 | if *removes { 8 } else { 0 } | if tint { 0 } else { 32 };
                 if self.ghost.as_ref().map(|(p, flags, _)| (*p, *flags)) != Some((ptr, flags)) {
-                    self.ghost = Some((ptr, flags, self.upload_body(device, g, flags)));
+                    self.ghost = Some((ptr, flags, self.upload_body(device, queue, g, flags)));
                 }
             }
             None => self.ghost = None,
@@ -1782,7 +1824,7 @@ impl ViewportRenderer {
             Some(c) => {
                 let ptr = Arc::as_ptr(c) as usize;
                 if self.context.as_ref().map(|(q, _)| *q) != Some(ptr) {
-                    self.context = Some((ptr, self.upload_body(device, c, CONTEXT)));
+                    self.context = Some((ptr, self.upload_body(device, queue, c, CONTEXT)));
                 }
             }
             None => self.context = None,
@@ -1796,7 +1838,7 @@ impl ViewportRenderer {
                     None => 4 | 32,
                 };
                 if self.preview.as_ref().map(|(q, flags, _)| (*q, *flags)) != Some((ptr, flags)) {
-                    self.preview = Some((ptr, flags, self.upload_body(device, p, flags)));
+                    self.preview = Some((ptr, flags, self.upload_body(device, queue, p, flags)));
                 }
             }
             None => self.preview = None,
@@ -1805,7 +1847,7 @@ impl ViewportRenderer {
             Some(t) => {
                 let ptr = Arc::as_ptr(t) as usize;
                 if self.threads.as_ref().map(|(q, _)| *q) != Some(ptr) {
-                    self.threads = Some((ptr, self.upload_body(device, t, THREAD_MARKS)));
+                    self.threads = Some((ptr, self.upload_body(device, queue, t, THREAD_MARKS)));
                 }
             }
             None => self.threads = None,

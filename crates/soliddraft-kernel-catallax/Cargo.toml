@@ -28,6 +28,9 @@ catallax-field = { git = "https://github.com/BohnBawerick/catallax", rev = "e15c
 catallax-features = { git = "https://github.com/BohnBawerick/catallax", rev = "e15c27e19bab4a2f341682138e7c9ab3be3b181e" }
 
 catallax-compare = { git = "https://github.com/BohnBawerick/catallax", rev = "e15c27e19bab4a2f341682138e7c9ab3be3b181e" }
+# The unproved GPU preview mesher, on the renderer's own wgpu device.
+catallax-preview = { git = "https://github.com/BohnBawerick/catallax", rev = "e15c27e19bab4a2f341682138e7c9ab3be3b181e" }
+wgpu.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1.1.5", features = ["time"] }

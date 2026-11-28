@@ -512,9 +512,6 @@ pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_coun
     if let Some(v) = sheet.format_overrides.get(key) {
         return v.clone();
     }
-    if let Some(bound) = bound_property(drawing, sheet, key) {
-        return bound;
-    }
     match key {
         "title" => drawing.meta.title.clone(),
         "number" => drawing.meta.number.clone(),

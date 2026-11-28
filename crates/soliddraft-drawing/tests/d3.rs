@@ -2596,7 +2596,7 @@ fn rebuilding_a_same_id_requirement_replaces_the_old_finish() {
 }
 
 #[test]
-fn rebuilding_a_location_moves_its_extension_to_the_new_feature_station() {
+fn rebuilding_a_location_moves_its_extension_and_can_replace_it_with_width() {
     use soliddraft_kernel_api::pmi::{Anchor, At, PmiKind, Tolerance};
     let kernel = BoxKernel::new();
     let mut part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
@@ -2634,7 +2634,7 @@ fn rebuilding_a_location_moves_its_extension_to_the_new_feature_station() {
     row.on_body.as_mut().unwrap().kind = kind(At::Middle);
     row.measured = vec![60.0];
     update_from_model(&mut drawing, &part).unwrap();
-    let drawing = drawing_roundtrip(&drawing);
+    let mut drawing = drawing_roundtrip(&drawing);
     let new = soliddraft_drawing::review::place_of_item(&drawing, "Location").unwrap();
     let a = drawing.annotation(new.annotation).unwrap();
     assert!(
@@ -2642,6 +2642,23 @@ fn rebuilding_a_location_moves_its_extension_to_the_new_feature_station() {
     );
     let xf = drawing.view(a.view).unwrap().geometry.transform.unwrap();
     assert_eq!(a.anchors.iter().map(|a| xf.unproject(a.cached).x).collect::<Vec<_>>(), [60.0, 120.0]);
+
+    part.digest = ContentHash::of_bytes(b"the same item now measures the width between both faces");
+    let row = &mut part.requirements.rows[0];
+    row.item.kind = PmiKind::Width { flats: [vec![], vec![]], tolerance: Tolerance::None };
+    row.on_body.as_mut().unwrap().kind =
+        PmiKind::Width { flats: [vec![face(0.0)], vec![face(120.0)]], tolerance: Tolerance::None };
+    row.measured = vec![120.0];
+    update_from_model(&mut drawing, &part).unwrap();
+    let drawing = drawing_roundtrip(&drawing);
+    let target = soliddraft_drawing::review::place_of_item(&drawing, "Location").unwrap();
+    assert!(soliddraft_drawing::review::find_place(&drawing, &target, "Location").is_some());
+    let a = drawing.annotation(target.annotation).unwrap();
+    assert!(
+        matches!(&a.body, AnnotationKind::Dimension(d) if d.value == soliddraft_drawing::DimValue::Measured { value: 120.0 })
+    );
+    let xf = drawing.view(a.view).unwrap().geometry.transform.unwrap();
+    assert_eq!(a.anchors.iter().map(|a| xf.unproject(a.cached).x).collect::<Vec<_>>(), [0.0, 120.0]);
 }
 
 #[test]

@@ -928,6 +928,12 @@ fn place_tool(
     push: &mut impl FnMut(DrawingAction),
 ) {
     let Some(p) = pointer else { return };
+    if let Err(error) = s.doc.check_part(doc) {
+        if clicked {
+            s.say(error);
+        }
+        return;
+    }
     let sheet_i = s.sheet;
     if s.doc.drawing.sheets.get(sheet_i).is_none() {
         s.pending = None;
@@ -1089,6 +1095,11 @@ fn place_tool(
     }
     if clicked {
         let view = pending.view.clone();
+        if let Err(error) = super::tools::pending_view_source(s, doc, &view) {
+            s.say(error);
+            s.set_tool(DrawingTool::Select);
+            return;
+        }
         let id = view.id;
         s.doc.remember(id, &pending.projected);
         push(DrawingAction::Command(Command::PlaceView { sheet: sheet_i, view: view.clone() }));

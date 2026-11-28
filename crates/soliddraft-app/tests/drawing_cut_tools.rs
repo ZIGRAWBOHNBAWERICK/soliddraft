@@ -251,6 +251,34 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     drawing(&mut app, DrawingAction::Select(Some(DrawingSel::View(offset.id))));
     assert!(shows(&app, "offset, 2 parallel cuts"), "the panel names the offset cut");
 
+    let mut kind = offset.kind.clone();
+    let ViewKind::Section { flip, hatch, .. } = &mut kind else { unreachable!() };
+    *flip = true;
+    *hatch = Some("ansi31".into());
+    drawing(&mut app, DrawingAction::Command(DrawCommand::EditView { view: offset.id, kind }));
+    click_label(&mut app, "Redraw cutting line…");
+    assert!(session(&app).draft.flip);
+    assert_eq!(session(&app).draft.hatch.as_deref(), Some("ansi31"));
+    click_label(&mut app, "Flip direction (flipped)");
+    click_label(&mut app, "Iron, steel (ANSI 31)");
+    click_label(&mut app, "General section (ISO 128-50)");
+    click_model(&mut app, top, first);
+    click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
+    click_label(&mut app, "Finish cutting line");
+    assert_eq!(view(&app, offset.id).kind, offset.kind);
+
+    let before = session(&app).doc.drawing.clone();
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Detail));
+    let sheet = format!("{} (this sheet)", session(&app).sheet().name);
+    click_label(&mut app, &sheet);
+    click_label(&mut app, "New sheet");
+    click_model(&mut app, top, first);
+    click_model(&mut app, top, Vec3::new(35.0, 23.0, 10.0));
+    assert!(session(&app).message.as_ref().is_some_and(|(text, _)| text.contains("not the one this drawing shows")));
+    assert_eq!(session(&app).doc.drawing, before);
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
+
     // An aligned section about the bore: a leg along +X, the pivot on the bore's axis
     // (it snaps), a leg along +Y turned into the plane of the first. Each leg cuts the
     // boss wall beside the bore (6 x 30) and the plate beyond it.

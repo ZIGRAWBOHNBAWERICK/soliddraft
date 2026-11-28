@@ -764,7 +764,7 @@ pub(crate) fn reattach_with(
         if let AnnotationState::Dangling { cause, .. } = &a.state {
             return Err(DrawingError::BadRequest(cause.clone()));
         }
-        if !crate::pmi_items::repaired_location_matches(a, &ctx, part, &index)? {
+        if !crate::pmi_items::repaired_linear_matches(a, &ctx, part, &index)? {
             a.source = None;
         }
         // Reattaching is a deliberate edit: the value it gives is the accepted one.

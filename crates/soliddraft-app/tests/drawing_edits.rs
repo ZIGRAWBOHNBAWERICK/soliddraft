@@ -50,6 +50,36 @@ fn drawing(doc: &Document) -> DrawingDoc {
 }
 
 #[test]
+fn a_prepared_view_projects_and_replays_only_with_the_linked_part() {
+    let doc = part(ProfileKind::Rectangle { width: 40.0, height: 30.0 });
+    let other = part(ProfileKind::Rectangle { width: 80.0, height: 30.0 });
+    let ctx = PartContext::new(&doc).unwrap();
+    let other_ctx = PartContext::new(&other).unwrap();
+    let mut d = drawing(&doc);
+    let kind = d.drawing.sheets[0].views[0].kind.clone();
+    let preview = |part: &PartContext<'_>| {
+        d.project_new(part, 0, &kind, soliddraft_drawing::ViewDisplay::ORTHOGRAPHIC, ViewScale::Sheet)
+    };
+    let error = preview(&other_ctx).unwrap_err();
+    assert_eq!(error, "The open part is not the one this drawing shows");
+    let (view, _) = preview(&ctx).unwrap();
+    let id = view.id;
+    let replay = |view: soliddraft_drawing::View| serde_json::json!({"op":"execute", "command":Command::PlaceView { sheet: 0, view }});
+    let input = replay(view.clone());
+    let error = d.run_journal_command(input.clone(), Some(&other_ctx)).unwrap_err();
+    assert_eq!(error, "The open part is not the one this drawing shows");
+    let mut from_other = drawing(&other).drawing.sheets[0].views[0].clone();
+    from_other.id = id;
+    let input_from_other = replay(from_other);
+    assert!(d.run_journal_command(input_from_other.clone(), Some(&ctx)).is_err());
+    assert!(d.run_journal_command(input_from_other, None).is_err());
+    assert!(d.drawing.view(id).is_none());
+    assert!(d.undo().is_none());
+    d.run_journal_command(input, Some(&ctx)).unwrap();
+    assert_eq!(d.drawing.view(id), Some(&view));
+}
+
+#[test]
 fn cropping_a_parent_refreshes_detail_picking_in_the_same_history_step() {
     let doc = part(ProfileKind::Circle { diameter: 10.0 });
     let ctx = PartContext::new(&doc).unwrap();

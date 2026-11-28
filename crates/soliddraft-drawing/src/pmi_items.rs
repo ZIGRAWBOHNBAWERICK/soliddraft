@@ -110,16 +110,17 @@ impl<'a> Body<'a> {
         Ok(End { shape, faces: anchor.feature.clone(), at: anchor.at, pair })
     }
 
-    fn location_matches(
-        &self,
-        annotation: &Annotation,
-        ctx: &ViewContext,
-        from: &soliddraft_kernel_api::pmi::Anchor<FaceId>,
-        to: &soliddraft_kernel_api::pmi::Anchor<FaceId>,
-    ) -> Option<bool> {
+    fn width_end(&self, faces: &[FaceId]) -> Result<End, String> {
+        Ok(End { shape: self.feature(faces)?, faces: faces.to_vec(), at: At::Feature, pair: None })
+    }
+
+    fn linear_matches(&self, annotation: &Annotation, ctx: &ViewContext, kind: &PmiKind<FaceId>) -> Option<bool> {
+        let (from, to) = match kind {
+            PmiKind::Location { from, to, .. } => (self.end(from).ok()?, self.end(to).ok()?),
+            PmiKind::Width { flats: [a, b], .. } => (self.width_end(a).ok()?, self.width_end(b).ok()?),
+            _ => return Some(true),
+        };
         let [first, second] = annotation.anchors.as_slice() else { return Some(false) };
-        let from = self.end(from).ok()?;
-        let to = self.end(to).ok()?;
         let (direction, towards) = linear_axis(&from, &to)?;
         // The dimension still lies the way it would be drawn in this view now.
         let frame = ctx.xf.in_leg(first.entity.section_leg).frame;
@@ -861,11 +862,8 @@ impl<'a> Planner<'a> {
                 self.linear(None, source, &from, &to, value, *tolerance)?;
             }
             PmiKind::Width { flats: [a, b], tolerance } => {
-                let end = |faces: &[FaceId]| -> Result<End, String> {
-                    Ok(End { shape: self.body.feature(faces)?, faces: faces.to_vec(), at: At::Feature, pair: None })
-                };
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
-                self.linear(None, source, &end(a)?, &end(b)?, value, *tolerance)?;
+                self.linear(None, source, &self.body.width_end(a)?, &self.body.width_end(b)?, value, *tolerance)?;
             }
             PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
                 let Shape::Plane { point, normal } = self.body.feature(bevel)? else {
@@ -1352,19 +1350,19 @@ pub(crate) fn authored_angle(annotation: &Annotation, part: &Part) -> Option<f64
     }
 }
 
-pub(crate) fn repaired_location_matches(
+pub(crate) fn repaired_linear_matches(
     annotation: &Annotation,
     ctx: &ViewContext,
     part: &Part,
     index: &PartIndex,
 ) -> Result<bool, DrawingError> {
     let Some(source @ PmiSource::Item { .. }) = &annotation.source else { return Ok(true) };
-    let Some(PmiKind::Location { from, to, .. }) =
+    let Some(kind @ (PmiKind::Location { .. } | PmiKind::Width { .. })) =
         row_of(source, &part.requirements.rows).and_then(|row| row.on_body.as_ref()).map(|item| &item.kind)
     else {
         return Ok(true);
     };
-    Ok(Body::new(part, index)?.location_matches(annotation, ctx, from, to) == Some(true))
+    Ok(Body::new(part, index)?.linear_matches(annotation, ctx, kind) == Some(true))
 }
 
 fn datum_target_body<F>(target: &soliddraft_kernel_api::pmi::DatumTarget<F>) -> AnnotationKind {
@@ -1442,7 +1440,10 @@ pub(crate) fn refresh(
     let all = &part.requirements.rows;
     let rows: BTreeMap<&str, &PmiRow> =
         all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
-    let body = if redraw && rows.values().any(|row| row.applies() && matches!(row.item.kind, PmiKind::Location { .. }))
+    let body = if redraw
+        && rows
+            .values()
+            .any(|row| row.applies() && matches!(row.item.kind, PmiKind::Location { .. } | PmiKind::Width { .. }))
     {
         Some(Body::new(part, index)?)
     } else {
@@ -1496,9 +1497,8 @@ pub(crate) fn refresh(
                 }
                 if let Some(body) = &body
                     && let Some(ctx) = contexts.and_then(|contexts| contexts.get(&annotation.view))
-                    && let Some(PmiKind::Location { from, to, .. }) =
-                        rows[item.as_str()].on_body.as_ref().map(|item| &item.kind)
-                    && body.location_matches(annotation, ctx, from, to) != Some(true)
+                    && let Some(item) = &rows[item.as_str()].on_body
+                    && body.linear_matches(annotation, ctx, &item.kind) != Some(true)
                 {
                     return false;
                 }

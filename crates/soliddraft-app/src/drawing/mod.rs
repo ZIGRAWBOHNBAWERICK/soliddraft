@@ -36,7 +36,7 @@ use soliddraft_document::DocumentId;
 use soliddraft_drawing::{
     AccuracyCounts, Anchor, Annotation, AnnotationId, AnnotationKind, AnnotationState, Command, ContentHash, DatumRef,
     DocKind, DocRef, Drawing, DrawingMeta, FoldDirection, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition,
-    Projection, Scale, SetKind, StyleOverrides, SurfaceProcess, View, ViewId,
+    Projection, Scale, SetKind, StyleOverrides, SurfaceProcess, View, ViewId, ViewKind,
 };
 use soliddraft_kernel_api::Point2;
 use soliddraft_kernel_api::drawing::StandardView;
@@ -776,6 +776,12 @@ impl DrawingSession {
         self.pending = None;
         self.fold_cache.clear();
         self.draft.reset();
+        if let DrawingTool::Section { replace: Some(id) } = self.tool
+            && let Some(ViewKind::Section { flip, hatch, .. }) = self.doc.drawing.view(id).map(|v| &v.kind)
+        {
+            self.draft.flip = *flip;
+            self.draft.hatch.clone_from(hatch);
+        }
     }
 
     /// The prompt of the current tool at its current stage.

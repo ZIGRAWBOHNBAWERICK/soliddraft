@@ -3,7 +3,7 @@
 //! back, and its owner field moves cells and back.
 
 use soliddraft_drawing::display::{self, Item};
-use soliddraft_drawing::{Command, DrawingError, TemplateId, TitleCell, UndoStack, file, fixture};
+use soliddraft_drawing::{Command, Drawing, DrawingError, TemplateId, TitleCell, UndoStack, file, fixture};
 
 fn owner_at(drawing: &soliddraft_drawing::Drawing) -> soliddraft_kernel_api::Point2 {
     display::layout_sheet(drawing, 0)
@@ -186,6 +186,22 @@ fn an_override_must_affect_title_text() {
 fn binding_a_title_property_preserves_the_sheet_override() {
     let mut drawing = fixture::bracket_a3();
     drawing.source_properties.insert("Description".into(), "Bracket arm".into());
+    drawing.source_properties.insert("qty".into(), "99".into());
+    for key in ["sheets", "projection", "owenr"] {
+        let bind = Command::BindTitleProperty { sheet: 0, key: key.into(), property: "qty".into() };
+        assert!(matches!(soliddraft_drawing::apply(&mut drawing, &bind), Err(DrawingError::BadRequest(_))));
+    }
+    let shows_sheet_count = |drawing: &Drawing| {
+        display::layout_sheet(drawing, 0).items.iter().any(|i| matches!(i, Item::Text(t) if t.text == "1 / 1"))
+    };
+    assert!(shows_sheet_count(&drawing));
+    drawing.sheets[0].title_bindings.insert("sheets".into(), "qty".into());
+    assert!(shows_sheet_count(&drawing));
+    soliddraft_drawing::apply(
+        &mut drawing,
+        &Command::BindTitleProperty { sheet: 0, key: "sheets".into(), property: String::new() },
+    )
+    .unwrap();
     let title = soliddraft_drawing::library::template("iso-a3").title_block.fields.iter().find(|f| f.key == "title");
     let title = title.expect("the block has a title field");
     let mut stack = UndoStack::new();

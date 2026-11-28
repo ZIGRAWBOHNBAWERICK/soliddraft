@@ -162,9 +162,7 @@ fn pending_of((view, ctx): (soliddraft_drawing::View, project::ViewContext), she
 }
 
 fn section_source(s: &DrawingSession, doc: &Document, parent: ViewId) -> Result<(), String> {
-    if !s.model_is(doc.model().id()) {
-        return Err("The open part is not the one this drawing shows".into());
-    }
+    s.doc.check_part(doc)?;
     let current = super::part::digest(doc);
     if !s.doc.drawing.view(parent).is_some_and(|view| view.geometry.source_digest == current.as_str()) {
         return Err("Rebuild the parent view before adding a cutting line".into());
@@ -172,12 +170,18 @@ fn section_source(s: &DrawingSession, doc: &Document, parent: ViewId) -> Result<
     Ok(())
 }
 
-fn pending_section_source(s: &DrawingSession, doc: &Document, pending: &PendingDerived) -> Result<(), String> {
-    if let ViewKind::Section { parent, .. } = pending.view.kind {
+pub(super) fn pending_view_source(
+    s: &DrawingSession,
+    doc: &Document,
+    view: &soliddraft_drawing::View,
+) -> Result<(), String> {
+    if let ViewKind::Section { parent, .. } = view.kind {
         section_source(s, doc, parent)?;
-        if pending.view.geometry.source_digest != super::part::digest(doc).as_str() {
-            return Err("Draw the section again from the current part".into());
-        }
+    } else {
+        s.doc.check_part(doc)?;
+    }
+    if view.geometry.source_digest != super::part::digest(doc).as_str() {
+        return Err("Draw the view again from the current part".into());
     }
     Ok(())
 }
@@ -222,6 +226,7 @@ fn compute_auxiliary(
     edge: EntityRef,
     flip: bool,
 ) -> Result<PendingDerived, String> {
+    s.doc.check_part(doc)?;
     with_part(doc, |part, index| derived::new_auxiliary(&s.doc.drawing, part, index, sheet, parent, edge, flip, None))
         .map(|made| pending_of(made, sheet))
 }
@@ -229,7 +234,7 @@ fn compute_auxiliary(
 /// Keeps a computed view for placing, or places it at once on another sheet.
 fn take_pending(s: &mut DrawingSession, doc: &Document, pending: PendingDerived, push: &mut impl FnMut(DrawingAction)) {
     if pending.sheet != s.sheet {
-        if let Err(error) = pending_section_source(s, doc, &pending) {
+        if let Err(error) = pending_view_source(s, doc, &pending.view) {
             s.say(error);
             return;
         }
@@ -452,7 +457,7 @@ fn place_pending(
     };
     card(sheet2.painter, sheet2.s(pending.view.position) + vec2(30.0, -30.0), &name, &line2);
     if clicked {
-        if let Err(error) = pending_section_source(s, doc, &pending) {
+        if let Err(error) = pending_view_source(s, doc, &pending.view) {
             s.say(error);
             return;
         }
@@ -764,8 +769,6 @@ fn half_section_tool(
     s.draft.reset();
 }
 
-/// Gives an existing section a new cutting line, keeping its letter, direction and
-/// hatch.
 fn redraw_section(
     s: &mut DrawingSession,
     doc: &Document,
@@ -773,21 +776,26 @@ fn redraw_section(
     line: &[Point2],
     push: &mut impl FnMut(DrawingAction),
 ) {
-    let Some(ViewKind::Section { parent, flip, label, hatch, .. }) =
-        s.doc.drawing.view(section).map(|v| v.kind.clone())
-    else {
+    let Some(ViewKind::Section { parent, label, .. }) = s.doc.drawing.view(section).map(|v| &v.kind) else {
         s.set_tool(DrawingTool::Select);
         return;
     };
-    let model_line = section_source(s, doc, parent).and_then(|()| {
+    let model_line = section_source(s, doc, *parent).and_then(|()| {
         with_part(doc, |part, index| {
-            let ctx = derived::context(&s.doc.drawing, part, index, parent)?;
+            let ctx = derived::context(&s.doc.drawing, part, index, *parent)?;
             Ok(line.iter().map(|q| ctx.xf.unproject(*q)).collect::<Vec<_>>())
         })
     });
     match model_line {
         Ok(model_line) => {
-            let kind = ViewKind::Section { parent, line: line.to_vec(), flip, label, model_line, hatch };
+            let kind = ViewKind::Section {
+                parent: *parent,
+                line: line.to_vec(),
+                flip: s.draft.flip,
+                label: label.clone(),
+                model_line,
+                hatch: s.draft.hatch.clone(),
+            };
             push(DrawingAction::Command(Command::EditView { view: section, kind }));
             push(DrawingAction::SetTool(DrawingTool::Select));
             push(DrawingAction::Select(Some(DrawingSel::View(section))));
@@ -875,6 +883,11 @@ fn target_sheet(s: &mut DrawingSession) -> usize {
 /// Computes the detail the draft describes and keeps it for placing.
 fn finish_detail(s: &mut DrawingSession, doc: &Document, push: &mut impl FnMut(DrawingAction)) {
     let Some(view) = s.draft.view else { return };
+    if let Err(e) = s.doc.check_part(doc) {
+        s.say(format!("Detail: {e}"));
+        s.draft.reset();
+        return;
+    }
     let pts = s.draft.points.clone();
     let (centre, radius, profile) = if s.draft.profile {
         let n = pts.len() as f64;

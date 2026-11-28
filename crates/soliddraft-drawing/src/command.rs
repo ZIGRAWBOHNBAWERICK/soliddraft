@@ -15,7 +15,7 @@ use crate::view::{
     AlignAxis, Alignment, Boundary, Break, BrokenOut, FoldDirection, HalfSection, View, ViewDisplay, ViewKind,
     ViewScale,
 };
-use crate::{DocRef, Drawing, DrawingError, DrawingMeta, library, measure, project};
+use crate::{ContentHash, DocRef, Drawing, DrawingError, DrawingMeta, library, measure, project};
 
 /// One undoable change to a drawing.
 // Placing a view carries the whole view; commands are run one at a time, so the size of
@@ -184,8 +184,7 @@ pub enum Command {
         layout: Option<TitleCell>,
     },
     /// Bind a title block field to a part property; an empty property removes the
-    /// binding. The value comes from the source the drawing accepted. Binding a field
-    /// clears the sheet's own value for it.
+    /// binding. The value comes from the source the drawing accepted.
     BindTitleProperty {
         /// Index of the sheet.
         sheet: usize,
@@ -440,35 +439,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         return Err(DrawingError::NeedsModel(command.name()));
     }
     match command {
-        Command::PlaceView { sheet, view } => {
-            if drawing.view(view.id).is_some() {
-                return Err(DrawingError::BadRequest(format!("{} is already on the drawing", view.id)));
-            }
-            if let Some(parent) = view.parent() {
-                let parent = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
-                if matches!(view.kind, ViewKind::Section { .. }) {
-                    if let Some(transform) = parent.geometry.transform {
-                        transform.check_section_parent()?;
-                    }
-                    if parent.geometry.source_digest != view.geometry.source_digest {
-                        return Err(DrawingError::BadRequest(
-                            "The section and its parent must come from the same part revision".into(),
-                        ));
-                    }
-                }
-            }
-            project::validate_break(&view.geometry, view.display, 1.0, !view.breaks.is_empty())?;
-            if view.letter().is_some_and(|l| l == drawing.next_view_label) {
-                drawing.next_view_label = next_letter(&drawing.next_view_label);
-            }
-            let sheet = drawing.sheets.get_mut(*sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))?;
-            let mut view = view.clone();
-            if let ViewKind::Projected { projection, .. } = &mut view.kind {
-                projection.get_or_insert(sheet.projection);
-            }
-            sheet.views.push(view);
-            Ok(())
-        }
+        Command::PlaceView { sheet, view } => place_view(drawing, *sheet, view, None),
         Command::MoveView { view, to } => move_view(drawing, *view, *to),
         Command::BreakAlignment { view } => {
             drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.alignment = None;
@@ -593,9 +564,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             let s = sheet_mut(drawing, *sheet)?;
             // Only a text field of the sheet's block, by its exact key, takes a value; a
             // stale value can still be cleared.
-            let template = library::template(s.template.as_str());
-            let editable = template.title_block.fields.iter().any(|field| field.symbol.is_none() && field.key == *key);
-            if !editable && !(value.is_empty() && s.format_overrides.contains_key(key)) {
+            if !title_text_field(s, key) && !(value.is_empty() && s.format_overrides.contains_key(key)) {
                 return Err(DrawingError::BadRequest(format!("The title block has no text field {key}")));
             }
             if value.is_empty() {
@@ -707,6 +676,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         }
         Command::BindTitleProperty { sheet, key, property } => {
             let s = sheet_mut(drawing, *sheet)?;
+            if !title_text_field(s, key) && !(property.is_empty() && s.title_bindings.contains_key(key)) {
+                return Err(DrawingError::BadRequest(format!("The title block has no text field {key}")));
+            }
             if property.is_empty() {
                 s.title_bindings.remove(key);
             } else {
@@ -930,6 +902,7 @@ impl Command {
         matches!(
             self,
             Self::UpdateFromModel
+                | Self::PlaceView { .. }
                 | Self::Reattach { .. }
                 | Self::EditView { .. }
                 | Self::SetViewCrop { .. }
@@ -1034,6 +1007,7 @@ fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation
 /// report for [`Command::UpdateFromModel`].
 pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Result<Option<UpdateReport>, DrawingError> {
     match command {
+        Command::PlaceView { sheet, view } => place_view(drawing, *sheet, view, Some(&part.digest)).map(|_| None),
         Command::AddDimension { annotation } | Command::AddAnnotation { annotation }
             if command.dimension_needs_model(drawing) =>
         {
@@ -1156,6 +1130,14 @@ fn add_annotation(drawing: &mut Drawing, annotation: &Annotation) -> Result<(), 
     Ok(())
 }
 
+fn title_text_field(sheet: &crate::Sheet, key: &str) -> bool {
+    library::template(sheet.template.as_str())
+        .title_block
+        .fields
+        .iter()
+        .any(|field| field.symbol.is_none() && field.key == key)
+}
+
 fn sheet_mut(drawing: &mut Drawing, sheet: usize) -> Result<&mut crate::Sheet, DrawingError> {
     drawing.sheets.get_mut(sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))
 }
@@ -1217,6 +1199,44 @@ fn align(drawing: &mut Drawing, view: ViewId) -> Result<(), DrawingError> {
         AlignAxis::Horizontal => v.position.v = p.v,
         AlignAxis::Vertical => v.position.u = p.u,
     }
+    Ok(())
+}
+
+fn place_view(
+    drawing: &mut Drawing,
+    sheet: usize,
+    view: &View,
+    digest: Option<&ContentHash>,
+) -> Result<(), DrawingError> {
+    if drawing.view(view.id).is_some() {
+        return Err(DrawingError::BadRequest(format!("{} is already on the drawing", view.id)));
+    }
+    if let Some(parent) = view.parent() {
+        let parent = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
+        if matches!(view.kind, ViewKind::Section { .. }) {
+            if let Some(transform) = parent.geometry.transform {
+                transform.check_section_parent()?;
+            }
+            if parent.geometry.source_digest != view.geometry.source_digest {
+                return Err(DrawingError::BadRequest(
+                    "The section and its parent must come from the same part revision".into(),
+                ));
+            }
+        }
+    }
+    if view.geometry.source_digest != digest.unwrap_or(&drawing.model.pinned).as_str() {
+        return Err(DrawingError::BadRequest("Draw the view again from the current part".into()));
+    }
+    project::validate_break(&view.geometry, view.display, 1.0, !view.breaks.is_empty())?;
+    let target = drawing.sheets.get_mut(sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))?;
+    if view.letter().is_some_and(|l| l == drawing.next_view_label) {
+        drawing.next_view_label = next_letter(&drawing.next_view_label);
+    }
+    let mut view = view.clone();
+    if let ViewKind::Projected { projection, .. } = &mut view.kind {
+        projection.get_or_insert(target.projection);
+    }
+    target.views.push(view);
     Ok(())
 }
 

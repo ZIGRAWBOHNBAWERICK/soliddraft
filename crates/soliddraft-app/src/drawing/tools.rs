@@ -255,6 +255,19 @@ fn preview_stroke() -> Stroke {
     Stroke::new(1.5, theme::accent())
 }
 
+fn redraw_on_parent_sheet(s: &mut DrawingSession, announce: bool) -> bool {
+    let DrawingTool::Section { replace: Some(id) } = s.tool else { return true };
+    let sheet =
+        s.doc.drawing.view(id).and_then(|v| v.parent()).and_then(|parent| project::sheet_of(&s.doc.drawing, parent));
+    if sheet == Some(s.sheet) {
+        return true;
+    }
+    if announce {
+        s.say("Switch to the parent view's sheet to redraw the cutting line");
+    }
+    false
+}
+
 /// The derived-view tools: section, detail, auxiliary, crop and broken-out.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn derived_tool(
@@ -269,6 +282,9 @@ pub(super) fn derived_tool(
     double_clicked: bool,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    if !redraw_on_parent_sheet(s, clicked) {
+        return;
+    }
     let Some(p) = pointer else {
         paint_draft(s, sheet2, None);
         return;
@@ -613,11 +629,17 @@ fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, p
         return;
     }
     if let Err(error) = section_source(s, doc, view) {
+        if replace.is_some() {
+            s.draft.clear_view_picks();
+        }
         s.say(error);
         return;
     }
     cache_picking(s, doc, view);
     let Some(xf) = s.doc.transforms.get(&view) else {
+        if replace.is_some() {
+            s.draft.clear_view_picks();
+        }
         s.say("Rebuild the view before adding a cutting line");
         return;
     };
@@ -626,7 +648,11 @@ fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, p
         Ok(line) => line,
         Err(e) => {
             s.say(format!("Section: {e}"));
-            s.draft.reset();
+            if replace.is_some() {
+                s.draft.clear_view_picks();
+            } else {
+                s.draft.reset();
+            }
             return;
         }
     };
@@ -650,6 +676,9 @@ pub fn finish_cut_action(state: &mut AppState) {
     let doc = &state.doc;
     let Some(s) = state.drawing.session.as_mut() else { return };
     let DrawingTool::Section { replace } = s.tool else { return };
+    if !redraw_on_parent_sheet(s, true) {
+        return;
+    }
     let mut actions = Vec::new();
     finish_cut(s, doc, replace, &mut |a| actions.push(a));
     for a in actions {
@@ -797,13 +826,10 @@ fn redraw_section(
                 hatch: s.draft.hatch.clone(),
             };
             push(DrawingAction::Command(Command::EditView { view: section, kind }));
-            push(DrawingAction::SetTool(DrawingTool::Select));
-            push(DrawingAction::Select(Some(DrawingSel::View(section))));
-            s.say("Cutting line redrawn");
         }
         Err(e) => {
             s.say(format!("Section: {e}"));
-            s.draft.reset();
+            s.draft.clear_view_picks();
         }
     }
 }

@@ -260,8 +260,10 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     assert!(session(&app).draft.flip);
     assert_eq!(session(&app).draft.hatch.as_deref(), Some("ansi31"));
     click_label(&mut app, "Flip direction (flipped)");
-    click_label(&mut app, "Iron, steel (ANSI 31)");
-    click_label(&mut app, "General section (ISO 128-50)");
+    // The hatch list reports its choice as a value, not a name to click: set what
+    // picking its first entry sets.
+    app.state_mut().state.drawing.session.as_mut().unwrap().draft.hatch = None;
+    app.run_steps(2);
     click_model(&mut app, top, first);
     click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
     click_label(&mut app, "Finish cutting line");
@@ -270,9 +272,10 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     let before = session(&app).doc.drawing.clone();
     std::mem::swap(&mut app.state_mut().state.doc, &mut other);
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::Detail));
-    let sheet = format!("{} (this sheet)", session(&app).sheet().name);
-    click_label(&mut app, &sheet);
-    click_label(&mut app, "New sheet");
+    // "New sheet" in the panel's sheet list, which also reports its choice as a value.
+    let new_sheet = session(&app).doc.drawing.sheets.len();
+    app.state_mut().state.drawing.session.as_mut().unwrap().draft.target_sheet = Some(new_sheet);
+    app.run_steps(2);
     click_model(&mut app, top, first);
     click_model(&mut app, top, Vec3::new(35.0, 23.0, 10.0));
     assert!(session(&app).message.as_ref().is_some_and(|(text, _)| text.contains("not the one this drawing shows")));
@@ -417,6 +420,92 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
         assert_eq!(after.kind, before.kind, "the {what} section's line reopens");
         near(cut_area(&app, &after), cut_area(&app, before), 1e-6, what);
     }
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+fn place_offset_section(app: &mut App, top: ViewId) -> ViewId {
+    drawing(app, DrawingAction::SetTool(DrawingTool::Section { replace: None }));
+    click_label(app, "Offset (stepped)");
+    click_model(app, top, Vec3::new(25.0, 23.0, 10.0));
+    click_model(app, top, Vec3::new(115.0, 67.0, 10.0));
+    click_label(app, "Finish cutting line");
+    place_right_of(app, top, 160.0);
+    sections(app).pop().expect("an offset section").id
+}
+
+#[test]
+fn redrawing_a_section_on_another_sheet_uses_its_parents_coordinates() {
+    let root = std::env::temp_dir().join(format!("soliddraft-redraw-other-sheet-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let top = view_named(&app, "Top view");
+    let id = place_offset_section(&mut app, top);
+    drawing(&mut app, DrawingAction::AddSheet);
+    drawing(&mut app, DrawingAction::MoveViewToSheet { view: id, sheet: 1 });
+    let original = view(&app, id);
+    click_label(&mut app, "Redraw cutting line…");
+    assert_eq!(session(&app).sheet, 0);
+    drawing(&mut app, DrawingAction::FlipPending);
+
+    click_model(&mut app, top, Vec3::new(25.0, 23.0, 10.0));
+    drawing(&mut app, DrawingAction::SetSheet(1));
+    let elsewhere = session(&app).screen_of(original.position);
+    click_at(&mut app, elsewhere);
+    assert_eq!(session(&app).draft.points.len(), 1);
+
+    drawing(&mut app, DrawingAction::SetSheet(0));
+    click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
+    drawing(&mut app, DrawingAction::SetSheet(1));
+    drawing(&mut app, DrawingAction::FinishCut);
+    assert_eq!(view(&app, id).kind, original.kind);
+
+    drawing(&mut app, DrawingAction::SetSheet(0));
+    click_label(&mut app, "Finish cutting line");
+    let ViewKind::Section { parent, flip, model_line, .. } = view(&app, id).kind else { panic!("an offset section") };
+    assert_eq!(parent, top);
+    assert!(flip);
+    let [a, b, c, d] = model_line.as_slice() else { panic!("two cuts and a jog: {model_line:?}") };
+    for p in [a, b] {
+        near(p.y, 23.0, 1e-5, "the first bore's Y");
+    }
+    for p in [c, d] {
+        near(p.y, 67.0, 1e-5, "the second bore's Y");
+    }
+    for p in [b, c] {
+        near(p.x, 70.0, 1e-5, "the jog halfway between the bores");
+    }
+    assert_eq!(session(&app).sheet, 1);
+    assert_eq!(session(&app).selection, Some(DrawingSel::View(id)));
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn retrying_a_failed_redraw_keeps_the_direction_and_hatch() {
+    let root = std::env::temp_dir().join(format!("soliddraft-redraw-retry-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let top = view_named(&app, "Top view");
+    let id = place_offset_section(&mut app, top);
+    let original = view(&app, id);
+    click_label(&mut app, "Redraw cutting line…");
+    drawing(&mut app, DrawingAction::FlipPending);
+    app.state_mut().state.drawing.session.as_mut().unwrap().draft.hatch = Some("ansi31".into());
+    let first = Vec3::new(25.0, 23.0, 10.0);
+    click_model(&mut app, top, first);
+    click_model(&mut app, top, first);
+    click_label(&mut app, "Finish cutting line");
+    assert_eq!(view(&app, id).kind, original.kind);
+    assert!(session(&app).draft.points.is_empty());
+    assert!(session(&app).draft.flip);
+    assert_eq!(session(&app).draft.hatch.as_deref(), Some("ansi31"));
+
+    click_model(&mut app, top, first);
+    click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
+    click_label(&mut app, "Finish cutting line");
+    let ViewKind::Section { parent, flip, hatch, .. } = view(&app, id).kind else { panic!("an offset section") };
+    assert_eq!(parent, top);
+    assert!(flip);
+    assert_eq!(hatch.as_deref(), Some("ansi31"));
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
 }

@@ -524,10 +524,14 @@ impl Default for ToolDraft {
 }
 
 impl ToolDraft {
-    /// Forgets the clicks of the current use, keeping the settings.
-    pub fn reset(&mut self) {
+    fn clear_view_picks(&mut self) {
         self.view = None;
         self.points.clear();
+    }
+
+    /// Forgets the clicks of the current use, keeping the settings.
+    pub fn reset(&mut self) {
+        self.clear_view_picks();
         self.anchors.clear();
         self.chamfer = None;
         self.pending = None;
@@ -769,6 +773,16 @@ impl DrawingSession {
         self.message = Some((text.into(), Instant::now()));
     }
 
+    fn show_sheet(&mut self, sheet: usize) {
+        if sheet < self.doc.drawing.sheets.len() && sheet != self.sheet {
+            self.sheet = sheet;
+            self.needs_fit = true;
+            self.selection = None;
+            self.note_edit = None;
+            self.sheet_rename = None;
+        }
+    }
+
     pub fn set_tool(&mut self, tool: DrawingTool) {
         self.tool = tool;
         self.picks.clear();
@@ -777,10 +791,13 @@ impl DrawingSession {
         self.fold_cache.clear();
         self.draft.reset();
         if let DrawingTool::Section { replace: Some(id) } = self.tool
-            && let Some(ViewKind::Section { flip, hatch, .. }) = self.doc.drawing.view(id).map(|v| &v.kind)
+            && let Some(ViewKind::Section { parent, flip, hatch, .. }) = self.doc.drawing.view(id).map(|v| &v.kind)
         {
             self.draft.flip = *flip;
             self.draft.hatch.clone_from(hatch);
+            if let Some(sheet) = project::sheet_of(&self.doc.drawing, *parent) {
+                self.show_sheet(sheet);
+            }
         }
     }
 
@@ -1623,11 +1640,29 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 Command::Reattach { annotation, end, .. } => Some((*annotation, *end)),
                 _ => None,
             };
+            let redraw = match &cmd {
+                Command::EditView { view, kind: ViewKind::Section { .. } } => Some(*view),
+                _ => None,
+            };
             let result = run_command(state, cmd);
             if let Some(s) = state.drawing.session.as_mut() {
-                match result {
-                    Err(e) => s.say(e),
-                    Ok(()) => {
+                let redraw = redraw.filter(|id| s.tool == (DrawingTool::Section { replace: Some(*id) }));
+                match (result, redraw) {
+                    (Err(e), redraw) => {
+                        if redraw.is_some() {
+                            s.draft.clear_view_picks();
+                        }
+                        s.say(e);
+                    }
+                    (Ok(()), Some(id)) => {
+                        if let Some(sheet) = project::sheet_of(&s.doc.drawing, id) {
+                            s.show_sheet(sheet);
+                        }
+                        s.set_tool(DrawingTool::Select);
+                        s.selection = Some(DrawingSel::View(id));
+                        s.say("Cutting line redrawn");
+                    }
+                    (Ok(()), None) => {
                         if let Some((annotation, end)) = repair
                             && s.tool == (DrawingTool::Reattach { annotation, end })
                         {
@@ -1879,15 +1914,8 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             }
         }
         DrawingAction::SetSheet(i) => {
-            if let Some(s) = state.drawing.session.as_mut()
-                && i < s.doc.drawing.sheets.len()
-                && i != s.sheet
-            {
-                s.sheet = i;
-                s.needs_fit = true;
-                s.selection = None;
-                s.note_edit = None;
-                s.sheet_rename = None;
+            if let Some(s) = state.drawing.session.as_mut() {
+                s.show_sheet(i);
             }
         }
         DrawingAction::AddSheet => {

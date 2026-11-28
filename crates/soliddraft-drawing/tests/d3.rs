@@ -1291,6 +1291,14 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     let id = section.id;
     let mut stack = UndoStack::new();
     run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: section });
+    for flip in [false, true] {
+        let edge = proposal.anchors[0].entity.clone();
+        let error = derived::new_auxiliary(&drawing, &part, &index, 0, id, edge, flip, None).unwrap_err();
+        assert!(
+            matches!(&error, soliddraft_drawing::DrawingError::BadRequest(message) if message == "An auxiliary view cannot use an unfolded aligned leg"),
+            "{error}"
+        );
+    }
     let child = [Point2::new(-10.0, 0.0), Point2::new(10.0, 0.0)];
     let error = derived::new_section(&drawing, &part, &index, 0, id, child, false, None).unwrap_err();
     assert!(error.to_string().contains("unfolded aligned view"));

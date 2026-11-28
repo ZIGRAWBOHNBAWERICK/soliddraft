@@ -1335,9 +1335,10 @@ fn auxiliary_axes(
         Resolution::Found(_) => return Err(DrawingError::BadRequest("an auxiliary view needs an edge".into())),
         Resolution::Lost(why) => return Err(DrawingError::LostReference(why)),
     };
+    if pctx.xf.leg_turn(edge.section_leg).is_some() {
+        return Err(DrawingError::BadRequest("An auxiliary view cannot use an unfolded aligned leg".into()));
+    }
     let curve = index.edge_curve(id).ok_or(DrawingError::LostReference("the edge has no curve".into()))?;
-    let turned = pctx.xf.leg_turn(edge.section_leg).map(|turn| turn.curve(curve));
-    let curve = turned.as_ref().unwrap_or(curve);
     let along = pctx.xf.vector(curve.end() - curve.start());
     let len = along.u.hypot(along.v);
     if len < 1e-6 {

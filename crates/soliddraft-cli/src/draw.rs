@@ -37,7 +37,8 @@ placed on the template's sheet, and the part's feature dimensions brought in
 (Model items). Writes the drawing file and its SVG, PDF and DXF. The drawing
 references the part by id and pins the part's revision.
 
-  --template   iso-a3 (default, first angle), iso-a4, ansi-a or ansi-b (third angle)
+  --template   iso-a4, iso-a3 (default), iso-a2, iso-a1 or iso-a0 (first angle);
+               ansi-a, ansi-b, ansi-c, ansi-d or ansi-e (third angle)
   --views      front, back, top, bottom, left, right, iso; the first orthographic
                view is the base view and the others fold off it (default: front, top,
                the side view right of the front view, and iso)
@@ -78,8 +79,8 @@ letter, or a view id. View edits:
   --break <view>:<x,y,z>:<x,y,z>:h|v
                                              leave out the stretch of the view between
                                              two model points, horizontally or
-                                             vertically, closed up to a gap (default
-                                             6 sheet mm); dimensions keep model lengths
+                                             vertically, closed up to a fixed gap of
+                                             6 sheet mm; dimensions keep model lengths
   --half-section <view>:<x,y,z>:<x,y,z>[:flip]
                                              cut open the side left of the symmetry line
                                              through two model points, to the plane

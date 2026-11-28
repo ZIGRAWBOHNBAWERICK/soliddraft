@@ -48,9 +48,9 @@ def kernel_calls(log):
             if isinstance(call, dict)]
 
 
-def adapter_of(viewport):
-    return {'backend': viewport.get('backend'), 'device_type': viewport.get('device_type'),
-            'name': viewport.get('adapter') or ''}
+def adapter_of(adapter):
+    return {'backend': adapter.get('backend'), 'device_type': adapter.get('device_type'),
+            'name': adapter.get('name') or ''}
 
 
 def native_scenario(args, name, out):
@@ -79,8 +79,10 @@ def summarize(name, bundle, exit_code):
         record['pass'] = report.get('pass')
         record['revisions'] = len({step.get('revision') for step in report.get('steps', []) if step.get('revision')})
     for display in sorted((bundle / 'commands').glob('*/display.json')):
-        shown = json.loads(display.read_text(encoding='utf-8'))
-        counts = shown.get('gpu_preview') or {}
+        # A capture whose renderer installed the GPU preview records its delivery beside
+        # display.json; without the record the step had no GPU preview at all.
+        delivery = display.with_name('display.gpu.json')
+        counts = json.loads(delivery.read_text(encoding='utf-8')) if delivery.is_file() else {}
         record['steps'] += 1
         record['status'] = counts.get('status')
         # The counts are the process's since it started; a fresh process starts again.
@@ -88,9 +90,8 @@ def summarize(name, bundle, exit_code):
             record[key] = max(record[key], counts.get(key, 0))
         for reason, count in (counts.get('refusals') or {}).items():
             record['refusals'][reason] = max(record['refusals'].get(reason, 0), count)
-        viewport = display.with_name('viewport.json')
-        if viewport.is_file():
-            adapter = adapter_of(json.loads(viewport.read_text(encoding='utf-8')))
+        if counts.get('adapter'):
+            adapter = adapter_of(counts['adapter'])
             if adapter not in record['adapters']:
                 record['adapters'].append(adapter)
     for log in sorted((bundle / 'commands').glob('*/kernel.json')):
@@ -117,7 +118,7 @@ def summarize(name, bundle, exit_code):
         except ValueError as error:
             problems.append(str(error))
     if not (record['status'] or '').startswith('GPU preview on'):
-        problems.append(f"GPU preview not on: {record['status']}")
+        problems.append(f"GPU preview not on: {record['status'] or 'not installed, no display.gpu.json'}")
     if record['steps'] and not record['gpu_previews']:
         problems.append('no GPU preview was shown')
     if record['cpu_previews']:

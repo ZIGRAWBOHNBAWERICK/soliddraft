@@ -64,9 +64,17 @@ pub struct EntityRef {
     /// that names its entities.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelEntity>,
+    /// The aligned section leg that supplies this reference. Zero is the first leg.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub section_leg: u8,
 }
 
 impl EntityRef {
+    /// Whether both references name the same current edge in the same section leg.
+    pub fn same_projected_entity(&self, other: &Self) -> bool {
+        self.kernel_hint.is_some() && self.kernel_hint == other.kernel_hint && self.section_leg == other.section_leg
+    }
+
     /// A reference without a kernel hint.
     pub fn new(kind: EntityKind, feature: &str, role: &str, ordinal: u32, point: Vec3, size: f64) -> EntityRef {
         EntityRef {
@@ -77,6 +85,11 @@ impl EntityRef {
             fingerprint: Fingerprint { point, size },
             kernel_hint: None,
             model: None,
+            section_leg: 0,
         }
     }
+}
+
+fn is_zero(leg: &u8) -> bool {
+    *leg == 0
 }

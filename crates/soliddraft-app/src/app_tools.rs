@@ -553,7 +553,7 @@ impl AppTools<'_> {
             "dxf": dxf,
             "manufacturing_information": exported.pmi,
             "drawing": {
-                "views": drawing.sheets[sheet].views.len(),
+                "views": drawing.sheets[sheet].views.iter().filter(|v| v.is_printed()).count(),
                 "accuracy": accuracy,
                 "items": requirements.placed,
                 "shown": shown,
@@ -847,7 +847,8 @@ impl AppTools<'_> {
             Value::Null => self.session()?.sheet().views.iter().map(|v| v.id).collect(),
             _ => vec![self.view(input)?.0],
         };
-        let added = drawing::add_centre_marks(self.session()?, &views);
+        let s = self.state.drawing.session.as_mut().ok_or(NO_DRAWING)?;
+        let added = drawing::add_centre_marks(s, &self.state.doc, &views);
         Ok(self.drawing_said(format!("{added} centre mark{} added", if added == 1 { "" } else { "s" })))
     }
 
@@ -1077,15 +1078,11 @@ fn kind_name<T: serde::Serialize>(kind: &T) -> Value {
     serde_json::to_value(kind).ok().and_then(|v| v.get("type").cloned()).unwrap_or(Value::Null)
 }
 
-/// The open drawing as agents read it: its sheets with their views and annotations by
-/// name, and how it stands against the part. Each view says whether its line work is at
-/// the pinned revision and whether it is a screen preview; each annotation says whether
-/// its references resolve and what it measures now, and the lists of changed and
-/// dangling annotations repeat what the Needs attention panel shows.
+/// The open drawing as agents read it, with named views and annotations. The lists of
+/// changed and dangling annotations come from the same checks as the Needs attention panel.
 fn drawing_json(state: &AppState) -> Option<Value> {
     let s = state.drawing.session.as_ref()?;
     let d = &s.doc.drawing;
-    let style = s.doc.style();
     let refusals: std::collections::BTreeMap<_, _> =
         s.doc.refused_views().map(|(_, id, name, cause)| (id, (name, cause))).collect();
     let (mut changed, mut dangling) = (Vec::new(), Vec::new());
@@ -1094,6 +1091,7 @@ fn drawing_json(state: &AppState) -> Option<Value> {
         .iter()
         .enumerate()
         .map(|(index, sheet)| {
+            let style = crate::drawing::document::DrawingDoc::style(sheet);
             let name_of = |id: ViewId| d.sheet_of(id).and_then(|s| s.view(id).map(|v| view_label_in(d, s, v)));
             let views: Vec<Value> = sheet
                 .views

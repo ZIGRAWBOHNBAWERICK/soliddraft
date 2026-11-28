@@ -116,6 +116,7 @@ pub enum Resolution {
 #[derive(Clone, Debug)]
 struct IndexedEdge {
     id: EdgeId,
+    faces: Vec<FaceId>,
     curve: Curve3,
     approximate: bool,
     origin: String,
@@ -189,6 +190,7 @@ impl<'k> PartIndex<'k> {
             };
             edges.push(IndexedEdge {
                 id: e.id,
+                faces: e.faces.clone(),
                 role: curve_role(&curve),
                 curve,
                 approximate,
@@ -229,6 +231,21 @@ impl<'k> PartIndex<'k> {
 
     pub(crate) fn exact_edge_curve(&self, id: EdgeId) -> Option<&Curve3> {
         self.edges.iter().find(|e| e.id == id && !e.approximate).map(|e| &e.curve)
+    }
+
+    pub(crate) fn entity_on_faces(&self, entity: Entity, faces: &[FaceId]) -> bool {
+        match entity {
+            Entity::Face(face) => faces.contains(&face),
+            Entity::Edge(edge) => self
+                .edges
+                .iter()
+                .find(|e| e.id == edge)
+                .is_some_and(|e| e.faces.iter().any(|face| faces.contains(face))),
+        }
+    }
+
+    pub(crate) fn edges_with_faces(&self) -> impl Iterator<Item = (EdgeId, &Curve3, &[FaceId])> {
+        self.edges.iter().map(|edge| (edge.id, &edge.curve, edge.faces.as_slice()))
     }
 
     /// Every edge of the body with its exact curve.

@@ -17,12 +17,13 @@ use crate::annotation::{
 use crate::ids::{AnnotationId, SHEET, ViewId};
 use crate::library::{Align, FieldDef, StyleFile, TemplateFile, Weight};
 use crate::measure::{CurveShape, display_text, shape_of};
-use crate::project::{effective_scale, view_bounds};
+use crate::project::{scale_in, view_bounds};
 use crate::view::{Accuracy, AccuracyCounts};
 
 mod symbols;
 mod tables;
 mod views;
+pub(crate) use views::clip_regions;
 
 use crate::sheet::{Projection, Sheet};
 use crate::view::{HiddenLines, TangentEdges, View, ViewKind, ViewScale};
@@ -30,7 +31,7 @@ use crate::{Drawing, library};
 pub use symbols::tolerance_text;
 pub(crate) use tables::keep_above_title_block;
 pub use tables::{REVISION_COLUMNS, hole_table_size, revision_table_home, revision_table_size, table_bounds};
-pub use views::{LocationLabel, clip_polygon, hatch_lines, location_labels, zone_at};
+pub use views::{LocationLabel, hatch_lines, location_labels, zone_at};
 
 /// What a path or text is for; the canvas and the writers map roles to colours, layers
 /// and pens.
@@ -149,6 +150,13 @@ pub enum Item {
 }
 
 impl Item {
+    pub(crate) fn bounds(&self) -> kurbo::Rect {
+        match self {
+            Self::Path(path) => path.path.bounding_box(),
+            Self::Text(text) => text.bounds(0.0),
+        }
+    }
+
     /// What the item belongs to.
     pub fn owner(&self) -> Owner {
         match self {
@@ -163,6 +171,26 @@ impl Item {
             Item::Path(p) => p.role,
             Item::Text(t) => t.role,
         }
+    }
+}
+
+impl TextItem {
+    pub(crate) fn bounds(&self, padding: f64) -> kurbo::Rect {
+        let width = text_width(&self.text, self.height);
+        let left = match self.halign {
+            Align::Left => 0.0,
+            Align::Centre => -width / 2.0,
+            Align::Right => -width,
+        };
+        let bottom = match self.valign {
+            VAlign::Bottom => 0.0,
+            VAlign::Centre => -self.height / 2.0,
+            VAlign::Top => -self.height,
+        };
+        let rect = kurbo::Rect::new(left, bottom, left + width, bottom + self.height).inflate(padding, padding);
+        let transform =
+            kurbo::Affine::translate((self.pos.u, self.pos.v)) * kurbo::Affine::rotate(self.angle.to_radians());
+        transform.transform_rect_bbox(rect)
     }
 }
 
@@ -183,6 +211,11 @@ pub struct DisplayList {
     /// never exported.
     pub unproved: bool,
     pub(crate) export_error: Option<String>,
+    display_only_views: Vec<ViewId>,
+    display_only_annotations: Vec<AnnotationId>,
+    display_only_tables: Vec<usize>,
+    display_only_items: Vec<std::ops::Range<usize>>,
+    print_only_items: Vec<Item>,
 }
 
 /// One dimension as its definition points, in sheet millimetres.
@@ -200,6 +233,7 @@ pub struct DimensionRecord {
     pub text_mid: Point2,
     /// Model millimetres per sheet millimetre, for editable measurements.
     pub measurement_scale: f64,
+    pub(crate) spans_break: bool,
     /// The dimension's formatting, before its value is rendered into text.
     pub format: Dimension,
 }
@@ -265,7 +299,41 @@ impl DisplayList {
     /// The items that belong on paper: everything but the interface's own marks (the
     /// changed-value highlight and the out-of-date hatch).
     pub fn printable(&self) -> impl Iterator<Item = &Item> {
-        self.items.iter().filter(|i| !matches!(i.role(), Role::Changed | Role::Stale))
+        self.items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                (Self::on_sheet(item)
+                    && self.prints_owner(item.owner())
+                    && !self.display_only_items.iter().any(|range| range.contains(&index)))
+                .then_some(item)
+            })
+            .chain(&self.print_only_items)
+    }
+
+    pub(crate) fn sheet_items(&self) -> impl Iterator<Item = &Item> {
+        self.items.iter().filter(|item| Self::on_sheet(item))
+    }
+
+    fn on_sheet(item: &Item) -> bool {
+        !matches!(item.role(), Role::Changed | Role::Stale)
+    }
+
+    fn prints_owner(&self, owner: Owner) -> bool {
+        match owner {
+            Owner::Curve(view, _) | Owner::View(view) => !self.display_only_views.contains(&view),
+            Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => !self.display_only_annotations.contains(&id),
+            Owner::Table(index) => !self.display_only_tables.contains(&index),
+            Owner::Sheet => true,
+        }
+    }
+
+    pub(crate) fn printable_dimensions(&self) -> impl Iterator<Item = &DimensionRecord> {
+        self.dimensions.iter().filter(|d| self.prints_owner(Owner::Annotation(d.owner)))
+    }
+
+    pub(crate) fn printable_hatches(&self) -> impl Iterator<Item = &HatchRecord> {
+        self.hatches.iter().filter(|h| self.prints_owner(h.owner))
     }
 
     /// Accuracy counts for the curve paths sent to the sheet writers.
@@ -299,7 +367,7 @@ impl DisplayList {
             }
         }
         if native_hatches {
-            counts.approximate += self.hatches.iter().filter(|h| h.approximate).count();
+            counts.approximate += self.printable_hatches().filter(|h| h.approximate).count();
         }
         counts
     }
@@ -428,25 +496,26 @@ fn field_text(drawing: &Drawing, sheet: &Sheet, field: &FieldDef, lookup: &dyn F
     bound_property(drawing, sheet, &field.key).unwrap_or_else(|| resolve_links(&field.value, lookup))
 }
 
+/// The most recent revision shown by the drawing's revision tables.
+pub fn table_revision(drawing: &Drawing) -> Option<&str> {
+    drawing
+        .sheets
+        .iter()
+        .rev()
+        .filter_map(|sheet| sheet.revision_table())
+        .find_map(|table| table.revisions.last())
+        .map(|row| row.revision.as_str())
+}
+
 /// The value of a title block property for a sheet.
 pub fn property(drawing: &Drawing, sheet: &Sheet, sheet_index: usize, sheet_count: usize, key: &str) -> String {
     if let Some(v) = sheet.format_overrides.get(key) {
         return v.clone();
     }
-    if let Some(bound) = bound_property(drawing, sheet, key) {
-        return bound;
-    }
     match key {
         "title" => drawing.meta.title.clone(),
         "number" => drawing.meta.number.clone(),
-        "revision" => drawing
-            .sheets
-            .iter()
-            .rev()
-            .filter_map(|s| s.revision_table())
-            .find_map(|t| t.revisions.last())
-            .map(|r| r.revision.clone())
-            .unwrap_or_else(|| drawing.meta.revision.clone()),
+        "revision" => table_revision(drawing).unwrap_or(&drawing.meta.revision).to_owned(),
         "designer" => drawing.meta.designer.clone(),
         "date" => drawing.meta.date.clone(),
         "scale" => sheet.scale.to_string(),
@@ -478,20 +547,57 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         hatches: Vec::new(),
         unproved: false,
         export_error: None,
+        display_only_views: Vec::new(),
+        display_only_annotations: Vec::new(),
+        display_only_tables: Vec::new(),
+        display_only_items: Vec::new(),
+        print_only_items: Vec::new(),
     };
     let Some(sheet) = drawing.sheets.get(sheet_index) else {
         return list;
     };
     list.unproved = sheet.views.iter().any(|v| v.geometry.unproved);
     list.export_error = crate::export::sheet_error(drawing, sheet);
+    list.display_only_views =
+        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| !v.is_printed()).map(|v| v.id).collect();
+    list.display_only_annotations =
+        sheet.annotations.iter().filter(|a| list.display_only_views.contains(&a.view)).map(|a| a.id).collect();
+    list.display_only_tables = sheet
+        .tables
+        .iter()
+        .enumerate()
+        .filter_map(|(i, table)| table.hole_view.filter(|v| list.display_only_views.contains(v)).map(|_| i))
+        .collect();
     format_items(drawing, sheet, ctx, &mut list.items);
-    tables::table_items(drawing, sheet, ctx, &mut list.items);
+    tables::table_items(drawing, sheet, ctx, &mut list);
     for view in &sheet.views {
         view_items(drawing, sheet, view, ctx, &mut list);
     }
-    views::parent_marks(drawing, sheet_index, ctx, &mut list.items);
+    views::parent_marks(drawing, sheet_index, ctx, &mut list);
     for a in &sheet.annotations {
-        annotation_items(sheet, a, ctx, &mut list);
+        let first = list.dimensions.len();
+        let view = sheet.view(a.view);
+        let scale = view.map_or(1.0, |v| scale_in(drawing, sheet_index, v));
+        annotation_items(sheet, a, ctx, &mut list, scale);
+        if let Some(view) = view
+            && let Some(gap) = view.geometry.breaks.first()
+        {
+            let along = |p: Point2| match gap.axis {
+                crate::AlignAxis::Horizontal => p.u - view.position.u,
+                crate::AlignAxis::Vertical => p.v - view.position.v,
+            };
+            for record in &mut list.dimensions[first..] {
+                let ends = match record.geometry {
+                    DimensionGeometry::Linear { p1, p2, .. } => Some((p1, p2)),
+                    DimensionGeometry::Ordinate { origin, feature, .. } => Some((origin, feature)),
+                    _ => None,
+                };
+                record.spans_break = ends.is_some_and(|(a, b)| {
+                    let (a, b) = (along(a), along(b));
+                    a.min(b) < gap.at + gap.gap && a.max(b) > gap.at
+                });
+            }
+        }
     }
     list
 }
@@ -599,7 +705,9 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
     }
     let lookup = |key: &str| property(drawing, sheet, ctx.sheet_index, ctx.sheet_count, key);
     for field in &tb.fields {
-        let [x, y, w, h] = field.cell;
+        let placed = sheet.title_layout.get(&field.key).filter(|cell| cell.fits(field));
+        let [x, y, w, h] = placed.map_or(field.cell, |p| p.cell);
+        let size = field.size;
         let cell = (o.u + x, o.v + y, w, h);
         items.push(Item::Text(TextItem {
             pos: Point2::new(cell.0 + 1.2, cell.1 + cell.3 - 1.0),
@@ -613,10 +721,11 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
             owner: Owner::Sheet,
         }));
         if field.symbol.as_deref() == Some("projection") {
-            projection_symbol(sheet.projection, Point2::new(cell.0 + cell.2 / 2.0, cell.1 + 3.2), lines.thin, items);
+            let (centre, scale) = projection_symbol_fit([cell.0, cell.1, cell.2, cell.3]);
+            projection_symbol(sheet.projection, centre, scale, lines.thin, items);
             continue;
         }
-        let value = field_text(drawing, sheet, field, &lookup);
+        let value = field_text(drawing, sheet, field, &lookup).lines().collect::<Vec<_>>().join(" ");
         if value.is_empty() {
             continue;
         }
@@ -625,9 +734,12 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
             Align::Centre => (Point2::new(cell.0 + cell.2 / 2.0, cell.1 + 1.5), Align::Centre),
             Align::Right => (Point2::new(cell.0 + cell.2 - 1.5, cell.1 + 1.5), Align::Right),
         };
+        let height = size.min(cell.3 - 5.0).max(1.8);
+        let available = (w - 3.0).max(0.0);
+        let height = height * (available / text_width(&value, height)).min(1.0);
         items.push(Item::Text(TextItem {
             pos,
-            height: field.size.min(cell.3 - 5.0).max(1.8),
+            height,
             angle: 0.0,
             text: value,
             halign,
@@ -639,19 +751,38 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
     }
 }
 
+/// Full-size projection symbol, centrelines included: width and height in millimetres.
+const SYMBOL_SIZE: (f64, f64) = (17.0, 6.75);
+/// Space the caption takes at the top of a title cell, with a gap below it.
+const CAPTION_DEPTH: f64 = 3.2;
+/// Clearance between the projection symbol and its cell's edges.
+const SYMBOL_MARGIN: f64 = 0.3;
+/// The smallest fraction of full size the projection symbol may be drawn at.
+pub(crate) const MIN_SYMBOL_SCALE: f64 = 0.65;
+
+/// Where the projection symbol sits in a title cell `[x, y, width, height]` and its
+/// size as a fraction of full size, centred below the caption.
+pub(crate) fn projection_symbol_fit(cell: [f64; 4]) -> (Point2, f64) {
+    let [x, y, w, h] = cell;
+    let (bottom, top) = (y + SYMBOL_MARGIN, y + h - CAPTION_DEPTH - SYMBOL_MARGIN);
+    let scale = ((top - bottom) / SYMBOL_SIZE.1).min((w - 2.0 * SYMBOL_MARGIN) / SYMBOL_SIZE.0).min(1.0);
+    (Point2::new(x + w / 2.0, (bottom + top) / 2.0), scale)
+}
+
 /// The first or third angle projection symbol: a truncated cone seen from the side and
-/// from its small end, the end view on the side the projection angle puts it.
-fn projection_symbol(projection: Projection, centre: Point2, width: f64, items: &mut Vec<Item>) {
-    let h = 4.5;
+/// from its small end, the end view on the side the projection angle puts it. `scale`
+/// is its size as a fraction of full size.
+fn projection_symbol(projection: Projection, centre: Point2, scale: f64, width: f64, items: &mut Vec<Item>) {
+    let h = 4.5 * scale;
     let (cone_dx, circle_dx) = match projection {
-        Projection::FirstAngle => (-4.5, 4.5),
-        Projection::ThirdAngle => (4.5, -4.5),
+        Projection::FirstAngle => (-h, h),
+        Projection::ThirdAngle => (h, -h),
     };
     let c = Point2::new(centre.u + cone_dx, centre.v);
     // Frustum: small end on the side facing the circles.
     let towards = if circle_dx > 0.0 { 1.0 } else { -1.0 };
-    let x_small = c.u + towards * 3.0;
-    let x_big = c.u - towards * 3.0;
+    let x_small = c.u + towards * 3.0 * scale;
+    let x_big = c.u - towards * 3.0 * scale;
     let trapezoid = polyline(&[
         Point2::new(x_small, c.v - h * 0.3),
         Point2::new(x_big, c.v - h * 0.5),
@@ -684,7 +815,7 @@ fn projection_symbol(projection: Projection, centre: Point2, width: f64, items: 
     for (a, b) in [
         (Point2::new(k.u - ext, k.v), Point2::new(k.u + ext, k.v)),
         (Point2::new(k.u, k.v - ext), Point2::new(k.u, k.v + ext)),
-        (Point2::new(c.u - 4.0, c.v), Point2::new(c.u + 4.0, c.v)),
+        (Point2::new(c.u - 4.0 * scale, c.v), Point2::new(c.u + 4.0 * scale, c.v)),
     ] {
         items.push(Item::Path(PathItem {
             path: line(a, b),
@@ -749,8 +880,13 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
     if scale_differs {
         lines_out.push(format!("SCALE {}", scale_text(scale)));
     }
+    let relationship = lines_out.len();
     if let Some(from) = views::location_from(drawing, view) {
         lines_out.push(from);
+    }
+    if relationship < lines_out.len() && view.parent().is_some_and(|id| list.display_only_views.contains(&id)) {
+        let at = items.len() + relationship;
+        list.display_only_items.push(at..at + 1);
     }
     for (n, text) in lines_out.into_iter().enumerate() {
         items.push(Item::Text(TextItem {
@@ -884,7 +1020,7 @@ fn editable_dimension(d: &Dimension, symbols: &crate::library::Symbols) -> Dimen
 }
 
 /// A dimension, note, callout, symbol or centre mark as items.
-fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut DisplayList) {
+fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut DisplayList, view_scale: f64) {
     let items = &mut list.items;
     let style = ctx.style;
     let lines = &ctx.format.lines;
@@ -896,7 +1032,6 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
     let width = lines.dimension;
     let place = to_sheet(sheet, a.view, a.placement);
     let anchors: Vec<Point2> = a.anchors.iter().map(|an| to_sheet(sheet, a.view, an.cached)).collect();
-    let view_scale = sheet.view(a.view).map(|v| effective_scale(sheet, v)).unwrap_or(1.0);
     let th = style.text.height;
     let mut text_at: Option<(Point2, f64, String, Align, VAlign)> = None;
     let push = |items: &mut Vec<Item>, path: BezPath, dash: Option<Vec<f64>>, r: Role| {
@@ -916,6 +1051,7 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
                         value: dim_value(d),
                         text_mid: at.0,
                         measurement_scale: 1.0 / view_scale,
+                        spans_break: false,
                         format: editable_dimension(d, &style.symbols),
                     });
                     text_at = Some((at.0, at.1, text, Align::Centre, at.2));
@@ -959,6 +1095,7 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
                         value: dim_value(d),
                         text_mid: mid,
                         measurement_scale: 1.0 / view_scale,
+                        spans_break: false,
                         format: editable_dimension(d, &style.symbols),
                     });
                     text_at = Some((pos, 0.0, text, halign, VAlign::Centre));
@@ -1077,13 +1214,19 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
             }
         }
         AnnotationKind::Centreline => {
-            let ends = match anchors.as_slice() {
-                [a, b] => Some([*a, *b]),
-                [a, b, c, d] => crate::measure::centreline([*a, *b, *c, *d]),
-                _ => None,
+            let gap = sheet.view(a.view).and_then(|v| v.geometry.breaks.first().copied());
+            let role = if matches!(a.state, AnnotationState::Dangling { .. }) { role } else { Role::Centre };
+            let segments: Vec<_> = match a.anchors.as_slice() {
+                [a, b] => {
+                    gap.map_or([[a.cached, b.cached], [b.cached, b.cached]], |g| g.trace(a.cached, b.cached)).into()
+                }
+                [a, b, c, d] => {
+                    crate::measure::centreline_segments([a.cached, b.cached, c.cached, d.cached], gap).collect()
+                }
+                _ => Vec::new(),
             };
-            if let Some([start, end]) = ends {
-                let role = if matches!(a.state, AnnotationState::Dangling { .. }) { role } else { Role::Centre };
+            for [start, end] in segments.into_iter().filter(|[a, b]| a != b) {
+                let [start, end] = [start, end].map(|p| to_sheet(sheet, a.view, p));
                 push(items, line(start, end), Some(CENTRE_DASH.to_vec()), role);
             }
         }
@@ -1269,8 +1412,10 @@ fn circle_radius(sheet: &Sheet, a: &Annotation) -> Option<f64> {
     let anchor = a.anchors.first()?;
     let view = sheet.view(a.view)?;
     let same = |c: &crate::Curve2| {
-        (c.source.kernel_hint.is_some() && c.source.kernel_hint == anchor.entity.kernel_hint)
-            || (c.source.feature == anchor.entity.feature && c.source.role == anchor.entity.role)
+        c.source.same_projected_entity(&anchor.entity)
+            || (c.source.section_leg == anchor.entity.section_leg
+                && c.source.feature == anchor.entity.feature
+                && c.source.role == anchor.entity.role)
     };
     let mut best: Option<f64> = None;
     for c in view.geometry.curves.iter().filter(|c| same(c)) {

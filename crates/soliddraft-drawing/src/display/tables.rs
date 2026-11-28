@@ -3,7 +3,7 @@
 
 use soliddraft_kernel_api::Point2;
 
-use super::{Context, Item, Owner, PathItem, Role, TextItem, VAlign, line, rect, to_sheet, zone_at};
+use super::{Context, DisplayList, Item, Owner, PathItem, Role, TextItem, VAlign, line, rect, to_sheet, zone_at};
 use crate::Drawing;
 use crate::annotation::AnnotationKind;
 use crate::assembly::bom_filename;
@@ -85,11 +85,12 @@ pub fn table_bounds(sheet: &Sheet) -> Vec<[f64; 4]> {
 }
 
 /// The zones of the revision symbols that carry `revision`, joined.
-fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>) -> String {
+fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>, printed: bool) -> String {
     let mut zones: Vec<String> = sheet
         .annotations
         .iter()
         .filter(|a| matches!(&a.body, AnnotationKind::RevisionSymbol { revision: r } if r == revision))
+        .filter(|a| !printed || a.view == crate::SHEET || sheet.view(a.view).is_some_and(crate::View::is_printed))
         .map(|a| zone_at(ctx.format, to_sheet(sheet, a.view, a.placement)))
         .collect();
     zones.sort();
@@ -98,18 +99,31 @@ fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>) -> String {
 }
 
 /// Every table of a sheet as items.
-pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut Vec<Item>) {
+pub(super) fn table_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, list: &mut DisplayList) {
+    let items = &mut list.items;
+    let has_fallback = sheet.views.iter().any(|view| !view.is_printed());
     let mut next_prefix = "A".to_owned();
     for (i, table) in sheet.tables.iter().enumerate() {
         let owner = Owner::Table(i);
         match table.kind {
             TableKind::Revision => {
-                let rows = table.revisions.iter().map(|row| {
-                    let zone =
-                        if row.zone.is_empty() { symbol_zones(sheet, &row.revision, ctx) } else { row.zone.clone() };
-                    [zone, row.revision.clone(), row.description.clone(), row.date.clone(), row.approved.clone()]
-                });
-                grid(table, ("REVISIONS", &REVISION_COLUMNS), rows, owner, ctx, items);
+                let rows = |printed| {
+                    table.revisions.iter().map(move |row| {
+                        let zone = if row.zone.is_empty() {
+                            symbol_zones(sheet, &row.revision, ctx, printed)
+                        } else {
+                            row.zone.clone()
+                        };
+                        [zone, row.revision.clone(), row.description.clone(), row.date.clone(), row.approved.clone()]
+                    })
+                };
+                let header = ("REVISIONS", &REVISION_COLUMNS);
+                let first = items.len();
+                grid(table, header, rows(false), owner, ctx, items);
+                if has_fallback && rows(false).ne(rows(true)) {
+                    list.display_only_items.push(first..items.len());
+                    grid(table, header, rows(true), owner, ctx, &mut list.print_only_items);
+                }
             }
             TableKind::Hole => {
                 let Some(view) = table.hole_view.and_then(|id| sheet.view(id)) else { continue };
@@ -121,7 +135,9 @@ pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, 
                 });
                 grid(table, ("HOLE TABLE · MODEL ORIGIN", &HOLE_COLUMNS), rows, owner, ctx, items);
 
-                let scale = crate::project::effective_scale(sheet, view);
+                // The view's scale follows a parent on any sheet.
+                let scale = crate::project::view_scale(drawing, view.id)
+                    .unwrap_or_else(|_| crate::project::effective_scale(sheet, view));
                 let mut tags = table.holes.iter().enumerate().peekable();
                 while let Some((i, h)) = tags.next() {
                     let mut label = format!("{prefix}{}", i + 1);

@@ -7,12 +7,15 @@ use soliddraft_kernel_api::Point2;
 use crate::annotation::{Annotation, AnnotationKind, AnnotationState, Dimension};
 use crate::entity::EntityRef;
 use crate::ids::SHEET;
-use crate::ids::{AnnotationId, ViewId};
-use crate::part::Part;
-use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind};
+use crate::ids::{AnnotationId, TemplateId, ViewId};
+use crate::part::{Part, PartIndex};
+use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind, TitleCell};
 use crate::update::{self, UpdateReport};
-use crate::view::{AlignAxis, Alignment, Boundary, BrokenOut, FoldDirection, View, ViewDisplay, ViewKind, ViewScale};
-use crate::{DocRef, Drawing, DrawingError, DrawingMeta, library, measure, project};
+use crate::view::{
+    AlignAxis, Alignment, Boundary, Break, BrokenOut, FoldDirection, HalfSection, View, ViewDisplay, ViewKind,
+    ViewScale,
+};
+use crate::{ContentHash, DocRef, Drawing, DrawingError, DrawingMeta, library, measure, project};
 
 /// One undoable change to a drawing.
 // Placing a view carries the whole view; commands are run one at a time, so the size of
@@ -78,6 +81,9 @@ pub enum Command {
         end: usize,
         /// The new entity.
         entity: EntityRef,
+        /// Explicit attachment picked on the new entity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attach: Option<crate::Attach>,
     },
     /// Replace an annotation with a note that keeps its text, the repair that gives up on
     /// its references.
@@ -158,6 +164,24 @@ pub enum Command {
         key: String,
         /// The value.
         value: String,
+    },
+    /// Change a sheet's format: its paper, zones and title block come from another
+    /// template. Its views, annotations, scale and projection angle stay as they are.
+    SetSheetFormat {
+        /// Index of the sheet.
+        sheet: usize,
+        /// The template.
+        template: TemplateId,
+    },
+    /// Place a title block field of a sheet elsewhere in the block, or back where its
+    /// template puts it.
+    SetTitleLayout {
+        /// Index of the sheet.
+        sheet: usize,
+        /// The field's key.
+        key: String,
+        /// The new place, or `None` for the template's.
+        layout: Option<TitleCell>,
     },
     /// Bind a title block field to a part property; an empty property removes the
     /// binding. The value comes from the source the drawing accepted.
@@ -313,6 +337,20 @@ pub enum Command {
         /// Index into the view's broken-out sections.
         index: usize,
     },
+    /// Give a view its breaks, or none. Remakes its line work.
+    SetViewBreaks {
+        /// The view.
+        view: ViewId,
+        /// The breaks, all running the same way.
+        breaks: Vec<Break>,
+    },
+    /// Make a view a half section, or a whole view again. Remakes its line work.
+    SetHalfSection {
+        /// The view.
+        view: ViewId,
+        /// The half section, or `None` for none.
+        half: Option<HalfSection>,
+    },
     /// Point an auxiliary view at another edge, the repair for a lost reference edge.
     ReattachView {
         /// The view.
@@ -362,6 +400,8 @@ impl Command {
             Command::SetAutomaticUpdate { .. } => "Automatic update",
             Command::SetMeta { .. } => "Document properties",
             Command::SetTitleField { .. } => "Title block",
+            Command::SetSheetFormat { .. } => "Sheet format",
+            Command::SetTitleLayout { .. } => "Title block layout",
             Command::BindTitleProperty { .. } => "Bind title field",
             Command::DeleteView { .. } => "Delete view",
             Command::RenameView { .. } => "Rename view",
@@ -383,6 +423,8 @@ impl Command {
             Command::SetViewCrop { .. } => "Crop view",
             Command::AddBrokenOut { .. } => "Broken-out section",
             Command::RemoveBrokenOut { .. } => "Remove broken-out section",
+            Command::SetViewBreaks { .. } => "Break view",
+            Command::SetHalfSection { .. } => "Half section",
             Command::ReattachView { .. } => "Reattach view",
         }
     }
@@ -393,27 +435,11 @@ impl Command {
 /// [`Command::UpdateFromModel`] and [`Command::Reattach`] read the part and return
 /// [`DrawingError::NeedsModel`] here; run them with [`apply_with`].
 pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingError> {
+    if command.adds_hole_callout() || command.dimension_needs_model(drawing) {
+        return Err(DrawingError::NeedsModel(command.name()));
+    }
     match command {
-        Command::PlaceView { sheet, view } => {
-            if drawing.view(view.id).is_some() {
-                return Err(DrawingError::BadRequest(format!("{} is already on the drawing", view.id)));
-            }
-            if let Some(parent) = view.parent()
-                && drawing.view(parent).is_none()
-            {
-                return Err(DrawingError::UnknownView(parent));
-            }
-            if view.letter().is_some_and(|l| l == drawing.next_view_label) {
-                drawing.next_view_label = next_letter(&drawing.next_view_label);
-            }
-            let sheet = drawing.sheets.get_mut(*sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))?;
-            let mut view = view.clone();
-            if let ViewKind::Projected { projection, .. } = &mut view.kind {
-                projection.get_or_insert(sheet.projection);
-            }
-            sheet.views.push(view);
-            Ok(())
-        }
+        Command::PlaceView { sheet, view } => place_view(drawing, *sheet, view, None),
         Command::MoveView { view, to } => move_view(drawing, *view, *to),
         Command::BreakAlignment { view } => {
             drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.alignment = None;
@@ -434,13 +460,11 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         }
         Command::EditDimension { annotation, dimension } => {
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
-            match &mut a.body {
-                AnnotationKind::Dimension(d) => {
-                    *d = dimension.clone();
-                    Ok(())
-                }
-                _ => Err(DrawingError::BadRequest(format!("{annotation} is not a dimension"))),
+            if !matches!(a.body, AnnotationKind::Dimension(_)) {
+                return Err(DrawingError::BadRequest(format!("{annotation} is not a dimension")));
             }
+            edit_annotation_body(a, &AnnotationKind::Dimension(dimension.clone()));
+            Ok(())
         }
         Command::DeleteAnnotation { annotation } => {
             for sheet in &mut drawing.sheets {
@@ -452,9 +476,8 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             Err(DrawingError::UnknownAnnotation(*annotation))
         }
         Command::FreezeAsNote { annotation } => {
-            let view = drawing.annotation(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?.view;
-            let template = drawing.sheet_of(view).or(drawing.sheets.first()).map(|s| s.template.as_str()).unwrap_or("");
-            let style = library::template(template).style_file();
+            let sheet = drawing.sheet_of_annotation(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
+            let style = library::template(sheet.template.as_str()).style_file();
             let symbols = style.symbols.clone();
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
             let text = match &a.body {
@@ -475,6 +498,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             // The reference mark says the text no longer follows the part.
             a.body = AnnotationKind::Note { text: format!("{text} (ref)"), leader: Vec::new() };
             a.anchors.clear();
+            a.source = None;
             a.state = AnnotationState::Ok;
             Ok(())
         }
@@ -498,6 +522,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             let a = drawing.annotation_mut(*annotation).ok_or(DrawingError::UnknownAnnotation(*annotation))?;
             match &mut a.body {
                 AnnotationKind::Note { text: t, .. } | AnnotationKind::HoleCallout { text: t } => {
+                    if *t != *text {
+                        a.source = None;
+                    }
                     *t = text.clone();
                     Ok(())
                 }
@@ -505,7 +532,9 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             }
         }
         Command::SetViewDisplay { view, display } => {
-            drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.display = *display;
+            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+            project::validate_break(&v.geometry, *display, 1.0, !v.breaks.is_empty())?;
+            v.display = *display;
             Ok(())
         }
         Command::SetViewExcluded { view, excluded } => {
@@ -533,6 +562,11 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         }
         Command::SetTitleField { sheet, key, value } => {
             let s = sheet_mut(drawing, *sheet)?;
+            // Only a text field of the sheet's block, by its exact key, takes a value; a
+            // stale value can still be cleared.
+            if !title_text_field(s, key) && !(value.is_empty() && s.format_overrides.contains_key(key)) {
+                return Err(DrawingError::BadRequest(format!("The title block has no text field {key}")));
+            }
             if value.is_empty() {
                 s.format_overrides.remove(key);
             } else {
@@ -540,8 +574,108 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             }
             Ok(())
         }
+        Command::SetSheetFormat { sheet, template } => {
+            let format = library::library()
+                .templates
+                .iter()
+                .find(|t| t.id == template.as_str())
+                .ok_or_else(|| DrawingError::BadRequest(format!("there is no template {template}")))?;
+            let model = format.template();
+            let s = drawing.sheets.get(*sheet).ok_or_else(|| DrawingError::BadRequest(format!("no sheet {sheet}")))?;
+            let outside: Vec<_> = s
+                .views
+                .iter()
+                .filter(|view| {
+                    let [x0, y0, x1, y1] = project::view_bounds(view);
+                    [x0, y0, x1, y1].iter().any(|v| !v.is_finite())
+                        || x0 < 0.0
+                        || y0 < 0.0
+                        || x1 > model.size.width_mm
+                        || y1 > model.size.height_mm
+                })
+                .map(|view| project::view_label_in(drawing, s, view))
+                .collect();
+            if !outside.is_empty() {
+                return Err(DrawingError::BadRequest(format!(
+                    "Move or rescale these views before changing the paper size: {}",
+                    outside.join(", ")
+                )));
+            }
+            let mut staged = drawing.clone();
+            let s = sheet_mut(&mut staged, *sheet)?;
+            s.template = template.clone();
+            s.size = model.size;
+            s.zones = model.zones;
+            // Cells placed for another block's fields go; the new block's own cells stand.
+            s.title_layout.retain(|key, cell| format.title_block.fields.iter().any(|f| &f.key == key && cell.fits(f)));
+            let list = crate::display::layout_sheet(&staged, *sheet);
+            let mut outside = Vec::new();
+            for item in list.sheet_items() {
+                use crate::display::Owner;
+                let bounds = item.bounds();
+                if bounds.x0 >= -1e-6
+                    && bounds.y0 >= -1e-6
+                    && bounds.x1 <= list.paper.0 + 1e-6
+                    && bounds.y1 <= list.paper.1 + 1e-6
+                {
+                    continue;
+                }
+                let label = match item.owner() {
+                    Owner::Sheet => continue,
+                    Owner::View(id) | Owner::Curve(id, _) => {
+                        let s = staged.sheet_of(id).expect("drawn view's sheet");
+                        project::view_label_in(&staged, s, s.view(id).expect("drawn view"))
+                    }
+                    Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => format!("annotation {id}"),
+                    Owner::Table(i) => match staged.sheets[*sheet].tables[i].kind {
+                        crate::TableKind::Revision => "revision table".into(),
+                        crate::TableKind::Hole => "hole table".into(),
+                        crate::TableKind::Bom => "bill of materials".into(),
+                    },
+                };
+                if !outside.contains(&label) {
+                    outside.push(label);
+                }
+            }
+            if !outside.is_empty() {
+                return Err(DrawingError::BadRequest(format!(
+                    "Move or rescale these items before changing the paper size: {}",
+                    outside.join(", ")
+                )));
+            }
+            drawing.sheets[*sheet] = staged.sheets.swap_remove(*sheet);
+            Ok(())
+        }
+        Command::SetTitleLayout { sheet, key, layout } => {
+            let s = sheet_mut(drawing, *sheet)?;
+            let format = library::template(s.template.as_str());
+            let field = format
+                .title_block
+                .fields
+                .iter()
+                .find(|f| &f.key == key)
+                .ok_or_else(|| DrawingError::BadRequest(format!("the title block has no field {key}")))?;
+            match layout {
+                Some(cell) if !cell.fits(field) => {
+                    return Err(DrawingError::BadRequest(format!(
+                        "{} must stay inside its template cell with room for its caption and value",
+                        field.label
+                    )));
+                }
+                Some(cell) => {
+                    s.title_layout.insert(key.clone(), *cell);
+                }
+                None => {
+                    s.title_layout.remove(key);
+                }
+            }
+            Ok(())
+        }
         Command::BindTitleProperty { sheet, key, property } => {
             let s = sheet_mut(drawing, *sheet)?;
+            if !title_text_field(s, key) && !(property.is_empty() && s.title_bindings.contains_key(key)) {
+                return Err(DrawingError::BadRequest(format!("The title block has no text field {key}")));
+            }
             if property.is_empty() {
                 s.title_bindings.remove(key);
             } else {
@@ -593,7 +727,7 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             if std::mem::discriminant(&a.body) != std::mem::discriminant(body) {
                 return Err(DrawingError::BadRequest(format!("{annotation} is another kind of annotation")));
             }
-            a.body = body.clone();
+            edit_annotation_body(a, body);
             Ok(())
         }
         Command::AddTable { sheet, table } => {
@@ -655,6 +789,8 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         | Command::SetViewCrop { .. }
         | Command::AddBrokenOut { .. }
         | Command::RemoveBrokenOut { .. }
+        | Command::SetViewBreaks { .. }
+        | Command::SetHalfSection { .. }
         | Command::ReattachView { .. } => Err(DrawingError::NeedsModel(command.name())),
     }
 }
@@ -721,6 +857,11 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
         return move_view(drawing, view, to);
     }
     let before = scale_followers(drawing, view)?;
+    let moved = drawing.view(view).expect("view on source sheet");
+    let ratio = project::scale_in(drawing, to_sheet, moved) / project::scale_in(drawing, from, moved);
+    for (id, _) in &before {
+        check_break_scale(drawing, *id, ratio)?;
+    }
     let s = &mut drawing.sheets[from];
     let i = s.views.iter().position(|v| v.id == view).expect("found");
     let mut v = s.views.remove(i);
@@ -752,51 +893,228 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     rescale_changed(drawing, before)
 }
 
+impl Command {
+    /// Whether the command can read geometry from the supplied part.
+    pub fn uses_part(&self, drawing: &Drawing) -> bool {
+        matches!(
+            self,
+            Self::UpdateFromModel
+                | Self::PlaceView { .. }
+                | Self::Reattach { .. }
+                | Self::EditView { .. }
+                | Self::SetViewCrop { .. }
+                | Self::AddBrokenOut { .. }
+                | Self::RemoveBrokenOut { .. }
+                | Self::SetViewBreaks { .. }
+                | Self::SetHalfSection { .. }
+                | Self::ReattachView { .. }
+                | Self::SetViewDisplay { .. }
+        ) || self.adds_hole_callout()
+            || self.dimension_needs_model(drawing)
+    }
+
+    fn adds_hole_callout(&self) -> bool {
+        matches!(self, Self::AddAnnotation { annotation } if matches!(annotation.body, AnnotationKind::HoleCallout { .. }))
+    }
+
+    /// Whether the command must measure anchors against the part before applying.
+    pub fn dimension_needs_model(&self, drawing: &Drawing) -> bool {
+        let annotation = match self {
+            Self::AddDimension { annotation } | Self::AddAnnotation { annotation } => {
+                let measured = match &annotation.body {
+                    AnnotationKind::Dimension(d) => matches!(d.value, crate::DimValue::Measured { .. }),
+                    AnnotationKind::DimensionSet(_) => matches!(self, Self::AddAnnotation { .. }),
+                    _ => false,
+                };
+                if !measured {
+                    return false;
+                }
+                annotation
+            }
+            Self::EditDimension { annotation, dimension }
+            | Self::EditAnnotation { annotation, body: AnnotationKind::Dimension(dimension) } => {
+                let Some(a) = drawing.annotation(*annotation) else { return false };
+                let AnnotationKind::Dimension(before) = &a.body else { return false };
+                if !matches!(dimension.value, crate::DimValue::Measured { .. })
+                    || (dimension.kind == before.kind
+                        && dimension.dim_type == before.dim_type
+                        && dimension.value == before.value
+                        && dimension.chamfer_angle == before.chamfer_angle)
+                {
+                    return false;
+                }
+                a
+            }
+            Self::EditAnnotation { annotation, body: AnnotationKind::DimensionSet(after) } => {
+                let Some(a) = drawing.annotation(*annotation) else { return false };
+                let AnnotationKind::DimensionSet(before) = &a.body else { return false };
+                if before.kind == after.kind
+                    && before.orientation == after.orientation
+                    && before.dim_type == after.dim_type
+                    && before.values == after.values
+                {
+                    return false;
+                }
+                a
+            }
+            _ => return false,
+        };
+        !annotation.anchors.is_empty()
+            && (annotation.anchors.iter().any(|a| a.entity.section_leg != 0)
+                || drawing.view(annotation.view).is_some_and(|view| !view.geometry.breaks.is_empty()))
+    }
+}
+
+fn edit_annotation_body(annotation: &mut Annotation, body: &AnnotationKind) {
+    fn text(dimension: &Dimension) -> &str {
+        if dimension.text.is_empty() { Dimension::VALUE_TEXT } else { &dimension.text }
+    }
+    let changed = match (&annotation.body, body) {
+        (AnnotationKind::Dimension(before), AnnotationKind::Dimension(after)) => {
+            before.kind != after.kind
+                || before.dim_type != after.dim_type
+                || before.value != after.value
+                || before.tolerance != after.tolerance
+                || before.chamfer_angle != after.chamfer_angle
+                || before.requirement != after.requirement
+                || text(before).trim() != text(after).trim()
+        }
+        (AnnotationKind::Note { text: before, .. }, AnnotationKind::Note { text: after, .. }) => before != after,
+        _ => annotation.body != *body,
+    };
+    if changed {
+        annotation.source = None;
+    }
+    annotation.body = body.clone();
+}
+
+fn measure_dimension(drawing: &Drawing, part: &Part, annotation: &mut Annotation) -> Result<(), DrawingError> {
+    let sheet = drawing.sheet_of(annotation.view).ok_or(DrawingError::UnknownView(annotation.view))?;
+    let view = sheet.view(annotation.view).expect("the view is on the sheet");
+    if view.geometry.source_digest != part.digest.as_str() {
+        return Err(DrawingError::BadRequest("Rebuild the view from the open part before dimensioning it".into()));
+    }
+    let index = PartIndex::build(part)?;
+    let context = crate::derived::context(drawing, part, &index, annotation.view)?;
+    let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
+    update::re_resolve(annotation, &index, &context, symbols, part);
+    if let AnnotationState::Dangling { cause, .. } = &annotation.state {
+        return Err(DrawingError::BadRequest(cause.clone()));
+    }
+    annotation.state = AnnotationState::Ok;
+    Ok(())
+}
+
 /// Applies any command, reading the part for those that need it. Returns the update's
 /// report for [`Command::UpdateFromModel`].
 pub fn apply_with(drawing: &mut Drawing, command: &Command, part: &Part) -> Result<Option<UpdateReport>, DrawingError> {
     match command {
+        Command::PlaceView { sheet, view } => place_view(drawing, *sheet, view, Some(&part.digest)).map(|_| None),
+        Command::AddAnnotation { annotation } if command.adds_hole_callout() => {
+            let view = drawing.view(annotation.view).ok_or(DrawingError::UnknownView(annotation.view))?;
+            if view.geometry.source_digest != part.digest.as_str() {
+                return Err(DrawingError::BadRequest(
+                    "Rebuild the view from the open part before adding a hole callout".into(),
+                ));
+            }
+            add_annotation(drawing, annotation).map(|_| None)
+        }
+        Command::AddDimension { annotation } | Command::AddAnnotation { annotation }
+            if command.dimension_needs_model(drawing) =>
+        {
+            let mut measured = annotation.clone();
+            measure_dimension(drawing, part, &mut measured)?;
+            if let AnnotationKind::Dimension(d) = &mut measured.body
+                && let crate::DimValue::Measured { value } = d.value
+            {
+                d.precision = d.precision.max(crate::measure::precision_for(value));
+            } else if let AnnotationKind::DimensionSet(set) = &mut measured.body {
+                set.precision =
+                    set.values.iter().copied().map(crate::measure::precision_for).fold(set.precision, u8::max);
+            }
+            add_annotation(drawing, &measured).map(|_| None)
+        }
+        Command::EditDimension { annotation, .. } | Command::EditAnnotation { annotation, .. }
+            if command.dimension_needs_model(drawing) =>
+        {
+            let mut measured = drawing.annotation(*annotation).expect("dimension to edit").clone();
+            match command {
+                Command::EditDimension { dimension, .. } => {
+                    edit_annotation_body(&mut measured, &AnnotationKind::Dimension(dimension.clone()))
+                }
+                Command::EditAnnotation { body, .. } => edit_annotation_body(&mut measured, body),
+                _ => unreachable!(),
+            }
+            measure_dimension(drawing, part, &mut measured)?;
+            *drawing.annotation_mut(*annotation).expect("dimension to edit") = measured;
+            Ok(None)
+        }
         Command::UpdateFromModel => update::update_from_model(drawing, part).map(Some),
-        Command::Reattach { annotation, end, entity } => {
-            update::reattach(drawing, part, *annotation, *end, entity.clone()).map(|_| None)
+        Command::Reattach { annotation, end, entity, attach } => {
+            update::reattach_with(drawing, part, *annotation, *end, entity.clone(), *attach).map(|_| None)
         }
         Command::ReattachView { view, edge } => update::reattach_view(drawing, part, *view, edge.clone()).map(|_| None),
-        Command::EditView { view, kind } => {
-            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+        Command::EditView { view, kind } => edit_and_regenerate(drawing, part, *view, |v| {
             if std::mem::discriminant(&v.kind) != std::mem::discriminant(kind) || v.parent() != kind_parent(kind) {
                 return Err(DrawingError::BadRequest(format!("{view} cannot become another kind of view")));
             }
             v.kind = kind.clone();
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
-        Command::SetViewCrop { view, crop } => {
-            drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.crop = crop.clone();
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
-        Command::AddBrokenOut { view, broken_out } => {
-            drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?.broken_out.push(broken_out.clone());
-            update::regenerate_view(drawing, part, *view).map(|_| None)
-        }
-        Command::RemoveBrokenOut { view, index } => {
-            let v = drawing.view_mut(*view).ok_or(DrawingError::UnknownView(*view))?;
+            Ok(())
+        }),
+        Command::SetViewCrop { view, crop } => edit_and_regenerate(drawing, part, *view, |v| {
+            v.crop.clone_from(crop);
+            Ok(())
+        }),
+        Command::AddBrokenOut { view, broken_out } => edit_and_regenerate(drawing, part, *view, |v| {
+            v.broken_out.push(broken_out.clone());
+            Ok(())
+        }),
+        Command::RemoveBrokenOut { view, index } => edit_and_regenerate(drawing, part, *view, |v| {
             if *index >= v.broken_out.len() {
                 return Err(DrawingError::BadRequest(format!("{view} has no broken-out section {index}")));
             }
             v.broken_out.remove(*index);
-            update::regenerate_view(drawing, part, *view).map(|_| None)
+            Ok(())
+        }),
+        Command::SetViewBreaks { view, breaks } => {
+            update::edit_breaks(drawing, part, *view, breaks.clone()).map(|_| None)
         }
+        Command::SetHalfSection { view, half } => edit_and_regenerate(drawing, part, *view, |v| {
+            if half.is_some() && !matches!(v.kind, ViewKind::Base { .. } | ViewKind::Projected { .. }) {
+                return Err(DrawingError::BadRequest("A half section requires a model or projected view".into()));
+            }
+            v.half.clone_from(half);
+            Ok(())
+        }),
         Command::SetViewDisplay { view, display } => {
             let before = drawing.view(*view).ok_or(DrawingError::UnknownView(*view))?.display;
-            apply(drawing, command)?;
-            // Tangent edges and seams change what the kernel returns; hidden lines only
-            // change what is drawn.
             if before.tangent != display.tangent || before.seams != display.seams {
-                update::regenerate_view(drawing, part, *view)?;
+                edit_and_regenerate(drawing, part, *view, |v| {
+                    v.display = *display;
+                    Ok(())
+                })
+            } else {
+                apply(drawing, command).map(|_| None)
             }
-            Ok(None)
         }
         other => apply(drawing, other).map(|_| None),
     }
+}
+
+fn edit_and_regenerate(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: ViewId,
+    edit: impl FnOnce(&mut View) -> Result<(), DrawingError>,
+) -> Result<Option<UpdateReport>, DrawingError> {
+    let v = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+    let before = v.clone();
+    edit(v)?;
+    let result = update::regenerate_view(drawing, part, id);
+    if result.is_err() {
+        *drawing.view_mut(id).expect("existing view") = before;
+    }
+    result.map(|_| None)
 }
 
 fn kind_parent(kind: &ViewKind) -> Option<ViewId> {
@@ -823,6 +1141,14 @@ fn add_annotation(drawing: &mut Drawing, annotation: &Annotation) -> Result<(), 
     Ok(())
 }
 
+fn title_text_field(sheet: &crate::Sheet, key: &str) -> bool {
+    library::template(sheet.template.as_str())
+        .title_block
+        .fields
+        .iter()
+        .any(|field| field.symbol.is_none() && field.key == key)
+}
+
 fn sheet_mut(drawing: &mut Drawing, sheet: usize) -> Result<&mut crate::Sheet, DrawingError> {
     drawing.sheets.get_mut(sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))
 }
@@ -837,8 +1163,12 @@ fn set_sheet_scale(drawing: &mut Drawing, sheet: usize, scale: Scale) -> Result<
         .flat_map(|(si, s)| s.views.iter().map(move |v| (si, v)))
         .map(|(si, v)| (v.id, project::scale_in(drawing, si, v)))
         .collect();
-    drawing.sheets[sheet].scale = scale;
-    rescale_changed(drawing, before)
+    let old = std::mem::replace(&mut drawing.sheets[sheet].scale, scale);
+    let result = rescale_changed(drawing, before);
+    if result.is_err() {
+        drawing.sheets[sheet].scale = old;
+    }
+    result
 }
 
 /// Deletes a view with its annotations, once nothing is derived from it.
@@ -883,6 +1213,44 @@ fn align(drawing: &mut Drawing, view: ViewId) -> Result<(), DrawingError> {
     Ok(())
 }
 
+fn place_view(
+    drawing: &mut Drawing,
+    sheet: usize,
+    view: &View,
+    digest: Option<&ContentHash>,
+) -> Result<(), DrawingError> {
+    if drawing.view(view.id).is_some() {
+        return Err(DrawingError::BadRequest(format!("{} is already on the drawing", view.id)));
+    }
+    if let Some(parent) = view.parent() {
+        let parent = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?;
+        if matches!(view.kind, ViewKind::Section { .. }) {
+            if let Some(transform) = parent.geometry.transform {
+                transform.check_section_parent()?;
+            }
+            if parent.geometry.source_digest != view.geometry.source_digest {
+                return Err(DrawingError::BadRequest(
+                    "The section and its parent must come from the same part revision".into(),
+                ));
+            }
+        }
+    }
+    if view.geometry.source_digest != digest.unwrap_or(&drawing.model.pinned).as_str() {
+        return Err(DrawingError::BadRequest("Draw the view again from the current part".into()));
+    }
+    project::validate_break(&view.geometry, view.display, 1.0, !view.breaks.is_empty())?;
+    let target = drawing.sheets.get_mut(sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))?;
+    if view.letter().is_some_and(|l| l == drawing.next_view_label) {
+        drawing.next_view_label = next_letter(&drawing.next_view_label);
+    }
+    let mut view = view.clone();
+    if let ViewKind::Projected { projection, .. } = &mut view.kind {
+        projection.get_or_insert(target.projection);
+    }
+    target.views.push(view);
+    Ok(())
+}
+
 /// Moves a view. An aligned view keeps the coordinate it shares with its parent, so it
 /// slides only along its alignment; views aligned to the moved view follow it.
 fn move_view(drawing: &mut Drawing, id: ViewId, to: Point2) -> Result<(), DrawingError> {
@@ -923,8 +1291,13 @@ fn move_view(drawing: &mut Drawing, id: ViewId, to: Point2) -> Result<(), Drawin
 /// the parent's scale, scale about each view's origin.
 fn set_view_scale(drawing: &mut Drawing, id: ViewId, scale: ViewScale) -> Result<(), DrawingError> {
     let before = scale_followers(drawing, id)?;
-    drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.scale = scale;
-    rescale_changed(drawing, before)
+    let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+    let old = std::mem::replace(&mut view.scale, scale);
+    let result = rescale_changed(drawing, before);
+    if result.is_err() {
+        drawing.view_mut(id).expect("existing view").scale = old;
+    }
+    result
 }
 
 /// Captures the effective scales of a view and descendants that inherit its scale.
@@ -947,42 +1320,72 @@ fn scale_followers(drawing: &Drawing, id: ViewId) -> Result<Vec<(ViewId, f64)>, 
 }
 
 fn rescale_changed(drawing: &mut Drawing, before: Vec<(ViewId, f64)>) -> Result<(), DrawingError> {
+    let mut changes = Vec::new();
     for (v, old) in before {
-        let ratio = project::view_scale(drawing, v)? / old;
+        let new = project::view_scale(drawing, v)?;
+        let ratio = new / old;
         if (ratio - 1.0).abs() >= 1e-12 {
-            rescale(drawing, v, ratio);
+            check_break_scale(drawing, v, ratio)?;
+            changes.push((v, old, new));
         }
+    }
+    for (v, old, new) in changes {
+        rescale(drawing, v, old, new);
     }
     Ok(())
 }
 
+fn check_break_scale(drawing: &Drawing, id: ViewId, ratio: f64) -> Result<(), DrawingError> {
+    let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
+    project::validate_break(&view.geometry, view.display, ratio, !view.breaks.is_empty())
+}
+
 /// Scales a view's line work and its annotations' points about the view's origin, and
 /// the marks its derived views keep on it.
-fn rescale(drawing: &mut Drawing, v: ViewId, ratio: f64) {
-    if let Some(view) = drawing.view_mut(v) {
-        project::rescale_view(view, ratio);
-    }
-    let s = |p: Point2| Point2::new(crate::part::round(p.u * ratio), crate::part::round(p.v * ratio));
+fn rescale(drawing: &mut Drawing, v: ViewId, old_scale: f64, new_scale: f64) {
+    let Some(view) = drawing.view_mut(v) else { return };
+    let gap = view.geometry.breaks.first().copied();
+    let ratio = new_scale / old_scale;
+    project::rescale_view(view, ratio);
+    let s = |p: Point2| project::scale_view_point(p, ratio, gap);
+    let rounded = |p: Point2| {
+        let q = s(p);
+        Point2::new(crate::part::round(q.u), crate::part::round(q.v))
+    };
     for child in drawing.sheets.iter_mut().flat_map(|sh| sh.views.iter_mut()).filter(|c| c.parent() == Some(v)) {
         match &mut child.kind {
-            ViewKind::Section { line, .. } => line.iter_mut().for_each(|p| *p = s(*p)),
+            ViewKind::Section { line, .. } => line.iter_mut().for_each(|p| *p = rounded(*p)),
             ViewKind::Detail { center, radius, profile, .. } => {
+                let boundary = if profile.len() >= 3 {
+                    crate::Boundary::Polygon { points: std::mem::take(profile) }
+                } else {
+                    crate::Boundary::Circle { center: *center, radius: *radius }
+                };
                 *center = s(*center);
-                *radius *= ratio;
-                profile.iter_mut().for_each(|p| *p = s(*p));
+                match project::scaled_boundary(&boundary, ratio, gap) {
+                    crate::Boundary::Circle { radius: scaled, .. } => *radius = scaled,
+                    crate::Boundary::Polygon { points } => *profile = points,
+                }
             }
             _ => {}
         }
     }
+    if gap.is_some() {
+        for table in drawing.sheets.iter_mut().flat_map(|s| &mut s.tables).filter(|t| t.hole_view == Some(v)) {
+            for hole in &mut table.holes {
+                let p = s(Point2::new(hole.centre.u * old_scale, hole.centre.v * old_scale));
+                hole.centre = Point2::new(p.u / new_scale, p.v / new_scale);
+            }
+        }
+    }
     for a in drawing.sheets.iter_mut().flat_map(|s| s.annotations.iter_mut()).filter(|a| a.view == v) {
-        let s = |p: Point2| Point2::new(crate::part::round(p.u * ratio), crate::part::round(p.v * ratio));
-        a.placement = s(a.placement);
+        a.placement = rounded(a.placement);
         for anchor in &mut a.anchors {
-            anchor.cached = s(anchor.cached);
+            anchor.cached = rounded(anchor.cached);
         }
         if let AnnotationKind::Note { leader, .. } = &mut a.body {
             for p in leader {
-                *p = s(*p);
+                *p = rounded(*p);
             }
         }
     }

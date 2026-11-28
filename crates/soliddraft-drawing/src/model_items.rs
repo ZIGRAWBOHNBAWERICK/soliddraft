@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::drawing::{Curve3, CurveSource};
+use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::{EdgeId, Point2, Vec3};
 
 use crate::annotation::{
@@ -93,7 +93,7 @@ struct Plan {
     view: ViewId,
     kind: DimensionKind,
     text: String,
-    anchors: Vec<(EdgeId, Attach, Point2)>,
+    anchors: Vec<(EdgeId, u8, Attach, Point2)>,
     value: f64,
     /// For linear dimensions: side (+1 or -1 along the extension direction) and the span.
     side: f64,
@@ -192,11 +192,6 @@ fn canonical_axis(a: Vec3) -> Vec3 {
     if big < 0.0 { -a } else { a }
 }
 
-/// True when the view shows the curve of `edge` as visible line work.
-pub(crate) fn visible_in(view: &ViewContext, edge: EdgeId) -> bool {
-    view.curves.curves.iter().any(|c| c.visible && c.source == CurveSource::Edge(edge))
-}
-
 /// The best edge of the body lying in the plane through `p` normal to `axis` and not
 /// seen end on in `view`: visible first, then the longest in the view, then the nearest
 /// the eye.
@@ -206,17 +201,20 @@ pub(crate) fn plane_edge(
     p: Vec3,
     axis: Vec3,
     tol: f64,
+    leg: u8,
+    on_feature: impl Fn(&[soliddraft_kernel_api::FaceId]) -> bool,
 ) -> Option<(EdgeId, bool)> {
     let mut best: Option<((bool, f64, f64), EdgeId)> = None;
-    for (id, curve) in index.edges() {
+    for (id, curve, _) in index.edges_with_faces().filter(|(_, _, faces)| on_feature(faces)) {
         let samples = curve.sample(0.0);
         if !samples.iter().all(|q| (*q - p).dot(axis).abs() <= tol.max(1e-7)) {
             continue;
         }
+        let Some(visible) = view.edge_visibility(id, leg) else { continue };
         let (mut lo, mut hi) =
             (Point2::new(f64::INFINITY, f64::INFINITY), Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
         for q in &samples {
-            let s = view.xf.vector(*q);
+            let s = view.xf.vector(view.xf.point_on_leg(leg, *q));
             lo = Point2::new(lo.u.min(s.u), lo.v.min(s.v));
             hi = Point2::new(hi.u.max(s.u), hi.v.max(s.v));
         }
@@ -224,8 +222,8 @@ pub(crate) fn plane_edge(
         if extent <= tol * view.xf.scale {
             continue;
         }
-        let depth = view.xf.frame.depth(curve.point_at(0.5));
-        let key = (visible_in(view, id), extent, depth);
+        let depth = view.xf.frame.depth(view.xf.point_on_leg(leg, curve.point_at(0.5)));
+        let key = (visible, extent, depth);
         let better = match &best {
             None => true,
             Some((k, _)) if key.0 != k.0 => key.0,
@@ -252,83 +250,92 @@ fn plan_distance(
     let axis = axis.normalized().ok_or("zero axis")?;
     let mut best: Option<(i32, Plan)> = None;
     for (order, v) in views.iter().enumerate() {
-        let f = &v.xf.frame;
-        if axis.dot(f.direction).abs() > 1e-6 {
-            continue;
-        }
-        let orientation = if axis.dot(f.right).abs() > 1.0 - 1e-6 {
-            LinearOrientation::Horizontal
-        } else if axis.dot(f.up).abs() > 1.0 - 1e-6 {
-            LinearOrientation::Vertical
-        } else {
-            continue;
-        };
-        let (Some((a, va)), Some((b, vb))) =
-            (plane_edge(index, v, from, axis, tol), plane_edge(index, v, to, axis, tol))
-        else {
-            continue;
-        };
-        if a == b {
-            continue;
-        }
-        let kind = DimensionKind::Linear { orientation };
-        let across = match orientation {
-            LinearOrientation::Horizontal => Point2::new(0.0, 1.0),
-            _ => Point2::new(1.0, 0.0),
-        };
-        // The side of the view the anchors lean to, along the extension direction.
-        let (ca, cb) = (index.edge_curve(a).expect("indexed"), index.edge_curve(b).expect("indexed"));
-        let lean = |c: &Curve3| {
-            let at = match c {
-                Curve3::Arc { center, .. } | Curve3::Circle { center, .. } => *center,
-                _ => c.point_at(0.5),
+        for leg in 0..=u8::from(v.xf.has_aligned_legs()) {
+            let frame = v.xf.in_leg(leg).frame;
+            let f = &frame;
+            if axis.dot(f.direction).abs() > 1e-6 {
+                continue;
+            }
+            let orientation = if axis.dot(f.right).abs() > 1.0 - 1e-6 {
+                LinearOrientation::Horizontal
+            } else if axis.dot(f.up).abs() > 1.0 - 1e-6 {
+                LinearOrientation::Vertical
+            } else {
+                continue;
             };
-            let q = v.xf.point(at);
-            q.u * across.u + q.v * across.v
-        };
-        let side = if lean(ca) + lean(cb) >= 0.0 { 1.0 } else { -1.0 };
-        let attach = |c: &Curve3| match c {
-            Curve3::Line { .. } => {
-                let (s, e) = (v.xf.point(c.start()), v.xf.point(c.end()));
-                let along = |q: Point2| (q.u * across.u + q.v * across.v) * side;
-                if along(e) > along(s) { Attach::End } else { Attach::Start }
+            let (Some((a, va)), Some((b, vb))) = (
+                plane_edge(index, v, from, axis, tol, leg, |_| true),
+                plane_edge(index, v, to, axis, tol, leg, |_| true),
+            ) else {
+                continue;
+            };
+            if a == b {
+                continue;
             }
-            _ => {
-                if side > 0.0 {
-                    Attach::Max
-                } else {
-                    Attach::Min
+            let kind = DimensionKind::Linear { orientation };
+            let across = match orientation {
+                LinearOrientation::Horizontal => Point2::new(0.0, 1.0),
+                _ => Point2::new(1.0, 0.0),
+            };
+            // The side of the view the anchors lean to, along the extension direction.
+            let curve = |id| {
+                let original = index.edge_curve(id).expect("indexed");
+                v.xf.leg_turn(leg)
+                    .map_or(std::borrow::Cow::Borrowed(original), |turn| std::borrow::Cow::Owned(turn.curve(original)))
+            };
+            let (ca, cb) = (curve(a), curve(b));
+            let lean = |c: &Curve3| {
+                let at = match c {
+                    Curve3::Arc { center, .. } | Curve3::Circle { center, .. } => *center,
+                    _ => c.point_at(0.5),
+                };
+                let q = v.xf.point(at);
+                q.u * across.u + q.v * across.v
+            };
+            let side = if lean(&ca) + lean(&cb) >= 0.0 { 1.0 } else { -1.0 };
+            let attach = |c: &Curve3| match c {
+                Curve3::Line { .. } => {
+                    let (s, e) = (v.xf.point(c.start()), v.xf.point(c.end()));
+                    let along = |q: Point2| (q.u * across.u + q.v * across.v) * side;
+                    if along(e) > along(s) { Attach::End } else { Attach::Start }
                 }
+                _ => {
+                    if side > 0.0 {
+                        Attach::Max
+                    } else {
+                        Attach::Min
+                    }
+                }
+            };
+            let (aa, ab) = (attach(&ca), attach(&cb));
+            let geo = [
+                AnchorGeometry { curve: Some(&ca), point: Vec3::ZERO, attach: aa },
+                AnchorGeometry { curve: Some(&cb), point: Vec3::ZERO, attach: ab },
+            ];
+            let Some(value) = measure(&kind, crate::annotation::DimType::Projected, &geo, &v.xf) else {
+                continue;
+            };
+            let pa = v.xf.point(anchor_point(&geo[0], &v.xf, across));
+            let pb = v.xf.point(anchor_point(&geo[1], &v.xf, across));
+            let true_shape =
+                sketch_normal.is_some_and(|n| n.normalized().is_some_and(|n| n.dot(f.direction).abs() > 1.0 - 1e-6));
+            let score = 4 * i32::from(true_shape) + i32::from(va) + i32::from(vb);
+            let plan = Plan {
+                view: v.id,
+                kind,
+                text: Dimension::VALUE_TEXT.to_owned(),
+                anchors: vec![(a, leg, aa, pa), (b, leg, ab, pb)],
+                value,
+                side,
+                span: value * v.xf.scale,
+                centre: Point2::default(),
+                radius: 0.0,
+            };
+            // Earlier views win ties: the base view comes first.
+            let score = score * 100 - order as i32;
+            if best.as_ref().is_none_or(|(s, _)| score > *s) {
+                best = Some((score, plan));
             }
-        };
-        let (aa, ab) = (attach(ca), attach(cb));
-        let geo = [
-            AnchorGeometry { curve: Some(ca), point: Vec3::ZERO, attach: aa },
-            AnchorGeometry { curve: Some(cb), point: Vec3::ZERO, attach: ab },
-        ];
-        let Some(value) = measure(&kind, crate::annotation::DimType::Projected, &geo, &v.xf) else {
-            continue;
-        };
-        let pa = v.xf.point(anchor_point(&geo[0], &v.xf, across));
-        let pb = v.xf.point(anchor_point(&geo[1], &v.xf, across));
-        let true_shape =
-            sketch_normal.is_some_and(|n| n.normalized().is_some_and(|n| n.dot(f.direction).abs() > 1.0 - 1e-6));
-        let score = 4 * i32::from(true_shape) + i32::from(va) + i32::from(vb);
-        let plan = Plan {
-            view: v.id,
-            kind,
-            text: Dimension::VALUE_TEXT.to_owned(),
-            anchors: vec![(a, aa, pa), (b, ab, pb)],
-            value,
-            side,
-            span: value * v.xf.scale,
-            centre: Point2::default(),
-            radius: 0.0,
-        };
-        // Earlier views win ties: the base view comes first.
-        let score = score * 100 - order as i32;
-        if best.as_ref().is_none_or(|(s, _)| score > *s) {
-            best = Some((score, plan));
         }
     }
     best.map(|(_, p)| p).ok_or_else(|| "no view shows both planes as edges".to_owned())
@@ -345,43 +352,53 @@ fn plan_diameter(
     let n = normal.normalized().ok_or("zero normal")?;
     let mut best: Option<((bool, i32, f64), Plan)> = None;
     for (order, v) in views.iter().enumerate() {
-        if n.dot(v.xf.frame.direction).abs() < 1.0 - 1e-6 {
-            continue;
-        }
-        for (id, curve) in index.edges() {
-            let (c, cn, r) = match curve {
-                Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. } => {
-                    (*center, *normal, *radius)
+        for leg in 0..=u8::from(v.xf.has_aligned_legs()) {
+            if n.dot(v.xf.in_leg(leg).frame.direction).abs() < 1.0 - 1e-6 {
+                continue;
+            }
+            for (id, curve) in index.edges() {
+                let (c, cn, r) = match curve {
+                    Curve3::Circle { center, normal, radius } | Curve3::Arc { center, normal, radius, .. } => {
+                        (*center, *normal, *radius)
+                    }
+                    _ => continue,
+                };
+                let off_axis = (c - center) - n * (c - center).dot(n);
+                if (r - radius).abs() > tol.max(1e-7)
+                    || cn.cross(n).length() > 1e-6
+                    || off_axis.length() > tol.max(1e-7)
+                {
+                    continue;
                 }
-                _ => continue,
-            };
-            let off_axis = (c - center) - n * (c - center).dot(n);
-            if (r - radius).abs() > tol.max(1e-7) || cn.cross(n).length() > 1e-6 || off_axis.length() > tol.max(1e-7) {
-                continue;
+                // Visible first, then the earlier view, then the circle nearest the eye.
+                let Some(visible) = v.edge_visibility(id, leg) else { continue };
+                let c = v.xf.point_on_leg(leg, c);
+                if !v.xf.retains(c) {
+                    continue;
+                }
+                let key = (visible, -(order as i32), v.xf.frame.depth(c));
+                let better = match &best {
+                    None => true,
+                    Some((k, _)) if (k.0, k.1) != (key.0, key.1) => (key.0, key.1) > (k.0, k.1),
+                    Some((k, _)) => key.2 > k.2 + tol,
+                };
+                if !better {
+                    continue;
+                }
+                let at = v.xf.point(c);
+                let plan = Plan {
+                    view: v.id,
+                    kind: DimensionKind::Diameter,
+                    text: Dimension::VALUE_TEXT.to_owned(),
+                    anchors: vec![(id, leg, Attach::Centre, at)],
+                    value: 2.0 * r,
+                    side: 1.0,
+                    span: 0.0,
+                    centre: at,
+                    radius: r * v.xf.scale,
+                };
+                best = Some((key, plan));
             }
-            // Visible first, then the earlier view, then the circle nearest the eye.
-            let key = (visible_in(v, id), -(order as i32), v.xf.frame.depth(c));
-            let better = match &best {
-                None => true,
-                Some((k, _)) if (k.0, k.1) != (key.0, key.1) => (key.0, key.1) > (k.0, k.1),
-                Some((k, _)) => key.2 > k.2 + tol,
-            };
-            if !better {
-                continue;
-            }
-            let at = v.xf.point(c);
-            let plan = Plan {
-                view: v.id,
-                kind: DimensionKind::Diameter,
-                text: Dimension::VALUE_TEXT.to_owned(),
-                anchors: vec![(id, Attach::Centre, at)],
-                value: 2.0 * r,
-                side: 1.0,
-                span: 0.0,
-                centre: at,
-                radius: r * v.xf.scale,
-            };
-            best = Some((key, plan));
         }
     }
     best.map(|(_, p)| p).ok_or_else(|| "no view shows the circle true shape".to_owned())
@@ -405,7 +422,7 @@ fn place(drawing: &mut Drawing, sheet: usize, index: &PartIndex, plans: Vec<Plan
         for (k, i) in members.into_iter().enumerate() {
             let offset = FIRST_OFFSET + STACK_STEP * k as f64;
             let p = &plans[i];
-            let (a, b) = (p.anchors[0].2, p.anchors[1].2);
+            let (a, b) = (p.anchors[0].3, p.anchors[1].3);
             let side = f64::from(side);
             placement[i] = if vertical == 1 {
                 let edge = if side > 0.0 { bbox[2] } else { bbox[0] };
@@ -441,8 +458,10 @@ fn place(drawing: &mut Drawing, sheet: usize, index: &PartIndex, plans: Vec<Plan
         let anchors = p
             .anchors
             .iter()
-            .filter_map(|(id, attach, cached)| {
-                Some(Anchor { entity: index.edge_ref(*id)?, attach: *attach, cached: *cached })
+            .filter_map(|(id, leg, attach, cached)| {
+                let mut entity = index.edge_ref(*id)?;
+                entity.section_leg = *leg;
+                Some(Anchor { entity, attach: *attach, cached: *cached })
             })
             .collect();
         drawing.sheets[sheet].annotations.push(Annotation {

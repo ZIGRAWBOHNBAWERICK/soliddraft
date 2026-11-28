@@ -41,6 +41,9 @@ pub struct UpdateReport {
     /// their last line work until they are repaired or deleted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dangling_views: Vec<DanglingView>,
+    /// PMI items that could not be drawn after the update.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unplaced_pmi: Vec<crate::pmi_items::Unplaced>,
     /// Each regenerated view's projection: its transform and the circles it sees, for
     /// tools that pick on the views.
     #[serde(skip)]
@@ -101,9 +104,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         dangling: Vec::new(),
         resolved: 0,
         dangling_views: Vec::new(),
+        unplaced_pmi: Vec::new(),
         projections: Vec::new(),
     };
     let mut contexts = Contexts::new();
+    let previous = saved_broken_transforms(drawing);
     let mut ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
     ids.sort_by_key(|&id| {
         std::iter::successors(drawing.view(id), |view| view.geometry_parent().and_then(|parent| drawing.view(parent)))
@@ -119,8 +124,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             .geometry_parent()
             .and_then(|parent| report.dangling_views.iter().find(|failure| failure.view == parent))
             .map(|failure| failure.cause.clone());
-        let failure = failure
-            .or_else(|| project::compute_in(drawing, part, &index, id, &mut contexts).err().map(|e| view_cause(&e)));
+        let failure = failure.or_else(|| {
+            project::compute_with_previous(drawing, part, &index, id, &mut contexts, Some(&previous))
+                .err()
+                .map(|e| view_cause(&e))
+        });
         if let Some(cause) = failure {
             let sheet = drawing.sheet_of(id).expect("listed");
             report.dangling_views.push(DanglingView {
@@ -141,14 +149,19 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
                 && view.geometry.coarse == ctx.projected.geometry.coarse
                 && view.geometry != ctx.projected.geometry)
         {
+            if let Some(before) = previous.get(&id) {
+                project::remap_view_boundaries(view, before, &ctx.xf);
+            }
             view.geometry = ctx.projected.geometry.clone();
-            report.views_updated += 1;
+            report.views_updated += usize::from(view.is_printed());
         }
         report.projections.push((id, ctx.projected.clone()));
     }
     for id in ids {
+        remap_parent(drawing, id, &previous, &contexts);
         follow_parent(drawing, id, &contexts);
     }
+    let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     let failed = |id| report.dangling_views.iter().any(|failure| failure.view == id);
     for sheet in &mut drawing.sheets {
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
@@ -158,24 +171,30 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             if failed(a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
                 continue;
             }
-            if let Some(change) = re_resolve(a, &index, ctx, &symbols) {
+            if let Some(change) = re_resolve(a, &index, ctx, &symbols, part) {
                 report.changed.push(change);
             }
         }
     }
     // What the drawing shows of the part's manufacturing information follows the part:
     // its values, and which items there are.
-    let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
     if let Some(sheet) = made_from_part {
         // An item now shown another way is taken off here and drawn again by the import.
-        crate::pmi_items::refresh(drawing, part, |id| !failed(id), true);
+        crate::pmi_items::refresh(
+            drawing,
+            part,
+            &index,
+            |id| id == crate::SHEET || report.projections.iter().any(|(view, _)| *view == id),
+            Some(&contexts),
+        )?;
+        report.changed.retain(|change| drawing.annotation(change.annotation).is_some());
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
             .filter(|v| !failed(v.id) && !v.excluded_from_update)
             .filter_map(|v| contexts.get(&v.id).cloned())
             .collect();
-        crate::pmi_items::import(drawing, sheet, part, &index, &views)?;
+        report.unplaced_pmi = crate::pmi_items::import(drawing, sheet, part, &index, &views)?.unplaced;
         crate::pmi_items::place_notes(drawing, sheet, part);
     }
     collect(drawing, &mut report);
@@ -208,25 +227,70 @@ pub(crate) fn follow_parent(drawing: &mut Drawing, id: ViewId, contexts: &Contex
     let Some(pctx) = contexts.get(&parent.id).filter(|ctx| ctx.projected.geometry == parent.geometry) else {
         return;
     };
-    let xf = pctx.xf;
     let view = drawing.view_mut(id).expect("found");
-    project::reproject_parent_marks(&mut view.kind, &xf);
+    project::reproject_parent_marks(&mut view.kind, pctx);
 }
 
 /// Points an auxiliary view at another edge, the repair for a lost reference edge, and
 /// remakes its line work.
 pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: EntityRef) -> Result<(), DrawingError> {
-    let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+    let mut staged = drawing.clone();
+    let view = staged.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
     let ViewKind::Auxiliary { edge, .. } = &mut view.kind else {
         return Err(DrawingError::BadRequest(format!("{id} is not an auxiliary view")));
     };
     *edge = entity;
-    regenerate_view(drawing, part, id)
+    regenerate(drawing, staged, part, id, None)
 }
 
 /// Remakes a view and its dependent descendants, keeping placement and accepted
 /// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
+    let staged = drawing.clone();
+    regenerate(drawing, staged, part, id, None)
+}
+
+pub(crate) fn edit_breaks(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: ViewId,
+    breaks: Vec<crate::Break>,
+) -> Result<(), DrawingError> {
+    let view = drawing.view(id).ok_or(DrawingError::UnknownView(id))?;
+    if matches!(view.kind, ViewKind::Detail { .. }) {
+        return Err(DrawingError::BadRequest("A detail inherits its parent's break".into()));
+    }
+    let staged = drawing.clone();
+    regenerate(drawing, staged, part, id, Some(breaks))
+}
+
+fn saved_broken_transforms(drawing: &Drawing) -> project::Transforms {
+    drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.views)
+        .filter(|view| !view.geometry.breaks.is_empty())
+        .filter_map(|view| Some((view.id, view.geometry.transform?)))
+        .collect()
+}
+
+fn remap_parent(drawing: &mut Drawing, id: ViewId, previous: &project::Transforms, contexts: &Contexts) {
+    if let Some(parent) = drawing.view(id).and_then(crate::View::geometry_parent)
+        && let (Some(before), Some(after)) = (previous.get(&parent), contexts.get(&parent))
+        && drawing.view(parent).is_some_and(|view| view.geometry == after.projected.geometry)
+    {
+        let view = drawing.view_mut(id).expect("listed view");
+        project::remap_parent_boundary(&mut view.kind, before, &after.xf);
+    }
+}
+
+fn regenerate(
+    drawing: &mut Drawing,
+    mut staged: Drawing,
+    part: &Part,
+    id: ViewId,
+    breaks: Option<Vec<crate::Break>>,
+) -> Result<(), DrawingError> {
     let descendants = project::dependent_views(drawing, id);
     let ids: Vec<_> = descendants
         .iter()
@@ -234,26 +298,91 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
     let index = PartIndex::build(part)?;
+    let mut previous = saved_broken_transforms(drawing);
+    let break_edit = breaks.is_some();
+    if let Some(breaks) = breaks {
+        // Where the views were drawn, so crops and callouts stay on the same material.
+        previous.extend(descendants.iter().filter_map(|&id| Some((id, drawing.view(id)?.geometry.transform?))));
+        let mut before = Contexts::new();
+        for &view in &ids {
+            if !previous.contains_key(&view) {
+                let _ = project::compute_in(drawing, part, &index, view, &mut before);
+            }
+        }
+        let estimated: Vec<_> = before
+            .into_iter()
+            .filter(|(id, _)| {
+                !previous.contains_key(id)
+                    && drawing.view(*id).is_some_and(|view| {
+                        view.geometry.breaks.is_empty() || view.geometry.source_digest == part.digest.as_str()
+                    })
+            })
+            .map(|(view, ctx)| (view, ctx.xf))
+            .collect();
+        previous.extend(estimated);
+        staged.view_mut(id).expect("existing view").breaks = breaks;
+    }
+    let outgrown: Vec<ViewId> = ids
+        .iter()
+        .copied()
+        .filter(|view| {
+            break_edit
+                && !previous.contains_key(view)
+                && drawing.view(*view).is_some_and(|v| !v.geometry.breaks.is_empty())
+        })
+        .collect();
+    if !outgrown.is_empty() {
+        // The plain view gives the frame, scale and centre the saved gap is drawn with.
+        let mut plain = staged.clone();
+        for &view in &outgrown {
+            let v = plain.view_mut(view).expect("listed view");
+            project::clear_clipping(v);
+        }
+        let mut fresh = Contexts::new();
+        for view in outgrown {
+            project::compute_in(&plain, part, &index, view, &mut fresh)?;
+            let saved = project::saved_transform(drawing, &fresh[&view]);
+            if let Some(xf) = saved {
+                previous.insert(view, xf);
+            }
+        }
+    }
     let mut contexts = Contexts::new();
     for &id in &ids {
-        project::compute_in(drawing, part, &index, id, &mut contexts)?;
+        project::compute_with_previous(
+            &staged,
+            part,
+            &index,
+            id,
+            &mut contexts,
+            (!previous.is_empty()).then_some(&previous),
+        )?;
+    }
+    for &id in &ids {
         let ctx = &contexts[&id];
-        let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+        let view = staged.view_mut(id).expect("computed view");
+        if let Some(before) = previous.get(&id) {
+            project::remap_view_boundaries(view, before, &ctx.xf);
+        }
         view.geometry = ctx.projected.geometry.clone();
     }
     for child in descendants {
-        follow_parent(drawing, child, &contexts);
+        remap_parent(&mut staged, child, &previous, &contexts);
+        follow_parent(&mut staged, child, &contexts);
     }
-    for sheet in &mut drawing.sheets {
+    for sheet in &mut staged.sheets {
         refresh_hole_tables(sheet, &index, &contexts, |view| ids.contains(&view));
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
         for a in sheet.annotations.iter_mut().filter(|a| ids.contains(&a.view)) {
             let context = &contexts[&a.view];
-            re_resolve(a, &index, context, symbols);
+            re_resolve(a, &index, context, symbols, part);
         }
     }
-    crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view), false);
-    drawing.refused_views.retain(|refusal| !ids.contains(&refusal.view));
+    if part.digest == staged.model.pinned {
+        crate::pmi_items::refresh(&mut staged, part, &index, |view| ids.contains(&view), None)?;
+    }
+    staged.refused_views.retain(|refusal| !ids.contains(&refusal.view));
+    *drawing = staged;
     Ok(())
 }
 
@@ -289,12 +418,25 @@ fn collect(drawing: &Drawing, report: &mut UpdateReport) {
     }
 }
 
+fn resolve_anchor(index: &PartIndex, ctx: &ViewContext, anchor: &crate::Anchor) -> Resolution {
+    let resolved = project::resolve_in_view(index, ctx, &anchor.entity);
+    if matches!(&resolved, Resolution::Found(Entity::Edge(_)))
+        && matches!(anchor.attach, Attach::Centre | Attach::EdgeParameter { .. })
+        && !ctx.xf.breaks.is_empty()
+        && crate::measure::resolve_model_pick(index, &ctx.xf, anchor).is_none()
+    {
+        return Resolution::Lost("The attachment point is inside the break".into());
+    }
+    resolved
+}
+
 /// Re-resolves one annotation; returns the change when its displayed value moved.
 pub(crate) fn re_resolve(
     a: &mut Annotation,
     index: &PartIndex,
     ctx: &ViewContext,
     symbols: &Symbols,
+    part: &Part,
 ) -> Option<ChangedValue> {
     if a.anchors.is_empty() {
         return None;
@@ -302,7 +444,7 @@ pub(crate) fn re_resolve(
     let found: Vec<Result<Entity, String>> = a
         .anchors
         .iter()
-        .map(|anchor| match index.resolve(&anchor.entity) {
+        .map(|anchor| match resolve_anchor(index, ctx, anchor) {
             Resolution::Found(e) => Ok(e),
             Resolution::Lost(why) => Err(why),
         })
@@ -316,34 +458,67 @@ pub(crate) fn re_resolve(
     }
     let entities: Vec<Entity> = found.into_iter().map(|r| r.expect("no losses")).collect();
     for (anchor, e) in a.anchors.iter_mut().zip(&entities) {
-        if let Some(r) = index.entity_ref(*e) {
+        if let Some(mut r) = index.entity_ref(*e) {
+            r.section_leg = anchor.entity.section_leg;
             anchor.entity = r;
         }
     }
-    remeasure(a, index, ctx, &entities, symbols)
+    remeasure(a, index, ctx, &entities, symbols, part)
+}
+
+pub(crate) fn anchor_curve<'a>(
+    ctx: &ViewContext,
+    anchor: &crate::Anchor,
+    curve: Option<&'a soliddraft_kernel_api::drawing::Curve3>,
+) -> Option<std::borrow::Cow<'a, soliddraft_kernel_api::drawing::Curve3>> {
+    let curve = curve?;
+    Some(match ctx.xf.leg_turn(anchor.entity.section_leg) {
+        Some(turn) => std::borrow::Cow::Owned(turn.curve(curve)),
+        None => std::borrow::Cow::Borrowed(curve),
+    })
+}
+
+pub(crate) fn anchor_geometry<'a>(
+    xf: &project::ViewTransform,
+    anchor: &crate::Anchor,
+    original: Option<&soliddraft_kernel_api::drawing::Curve3>,
+    curve: Option<&'a soliddraft_kernel_api::drawing::Curve3>,
+) -> AnchorGeometry<'a> {
+    let turn = xf.leg_turn(anchor.entity.section_leg);
+    let placed = |p| turn.map_or(p, |turn| turn.point(p));
+    let attach = match (anchor.attach, original) {
+        (Attach::Point { at }, _) => Attach::Point { at: placed(at) },
+        (Attach::EdgeParameter { t }, Some(curve)) => Attach::Point { at: placed(curve.point_at(t)) },
+        (other, _) => other,
+    };
+    AnchorGeometry { curve, point: placed(anchor.entity.fingerprint.point), attach }
 }
 
 /// Re-caches the anchors' points and re-measures a dimension whose anchors all resolve to
 /// `entities`; sets the state and returns the change when the displayed value moved.
-pub(crate) fn remeasure(
+fn remeasure(
     a: &mut Annotation,
     index: &PartIndex,
     ctx: &ViewContext,
     entities: &[Entity],
     symbols: &Symbols,
+    part: &Part,
 ) -> Option<ChangedValue> {
-    let geometry: Vec<AnchorGeometry> = a
+    let authored_angle = crate::pmi_items::authored_angle(a, part);
+    let originals: Vec<_> = entities
+        .iter()
+        .map(|e| match e {
+            Entity::Edge(id) => index.edge_curve(*id),
+            Entity::Face(_) => None,
+        })
+        .collect();
+    let curves: Vec<_> =
+        a.anchors.iter().zip(&originals).map(|(anchor, curve)| anchor_curve(ctx, anchor, *curve)).collect();
+    let geometry: Vec<_> = a
         .anchors
         .iter()
-        .zip(entities)
-        .map(|(anchor, e)| AnchorGeometry {
-            curve: match e {
-                Entity::Edge(id) => index.edge_curve(*id),
-                Entity::Face(_) => None,
-            },
-            point: anchor.entity.fingerprint.point,
-            attach: anchor.attach,
-        })
+        .zip(originals.iter().zip(&curves))
+        .map(|(anchor, (original, curve))| anchor_geometry(&ctx.xf, anchor, *original, curve.as_deref()))
         .collect();
     let (before_state, mut change) = (a.state.clone(), None);
     match &mut a.body {
@@ -354,6 +529,8 @@ pub(crate) fn remeasure(
                     d.chamfer_angle = Some(crate::model_items::round_value(angle));
                     size
                 })
+            } else if d.kind == crate::DimensionKind::Angular {
+                authored_angle.or_else(|| measure(&d.kind, d.dim_type, &geometry, &ctx.xf))
             } else {
                 measure(&d.kind, d.dim_type, &geometry, &ctx.xf)
             };
@@ -391,9 +568,14 @@ pub(crate) fn remeasure(
                 anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, across));
             }
             let old = set.values_text();
-            if let Some(values) = crate::measure::measure_set(set, &geometry, &ctx.xf) {
-                set.values = values.into_iter().map(crate::model_items::round_value).collect();
-            }
+            let Some(values) = crate::measure::measure_set(set, &geometry, &ctx.xf) else {
+                a.state = AnnotationState::Dangling {
+                    lost: (0..a.anchors.len()).collect(),
+                    cause: "The references cannot measure this dimension set".into(),
+                };
+                return None;
+            };
+            set.values = values.into_iter().map(crate::model_items::round_value).collect();
             let now = set.values_text();
             let accepted = match &before_state {
                 AnnotationState::Changed { previous } => previous.clone(),
@@ -408,9 +590,9 @@ pub(crate) fn remeasure(
         body => {
             if matches!(body, AnnotationKind::Centreline)
                 && a.anchors.len() == 4
-                && crate::measure::projected_edge_ends(&geometry, &ctx.xf)
-                    .and_then(crate::measure::centreline)
-                    .is_none()
+                && !crate::measure::projected_edge_ends(&geometry, &ctx.xf).is_some_and(|ends| {
+                    crate::measure::centreline_segments(ends, ctx.xf.gaps().first().copied()).next().is_some()
+                })
             {
                 a.state = AnnotationState::Dangling {
                     lost: (0..a.anchors.len()).collect(),
@@ -418,8 +600,22 @@ pub(crate) fn remeasure(
                 };
                 return None;
             }
-            for (anchor, g) in a.anchors.iter_mut().zip(&geometry) {
-                anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, Default::default()));
+            for ((anchor, g), entity) in a.anchors.iter_mut().zip(&geometry).zip(entities) {
+                let point = ctx.xf.point(anchor_point(g, &ctx.xf, Default::default()));
+                anchor.cached = if matches!(entity, Entity::Face(_)) && matches!(anchor.attach, Attach::Point { .. }) {
+                    let segments = ctx
+                        .projected
+                        .geometry
+                        .curves
+                        .iter()
+                        .filter(|c| {
+                            c.source.kind == anchor.entity.kind && c.source.same_projected_entity(&anchor.entity)
+                        })
+                        .flat_map(|c| c.path.segments());
+                    project::nearest_drawn_point(point, segments).unwrap_or(point)
+                } else {
+                    point
+                };
             }
             a.state = AnnotationState::Ok;
             match body {
@@ -429,11 +625,8 @@ pub(crate) fn remeasure(
                     }
                 }
                 AnnotationKind::HoleCallout { text } => {
-                    let circle = entities.first().and_then(|e| match e {
-                        Entity::Edge(id) => {
-                            ctx.projected.circles.iter().find(|c| c.entity.kernel_hint == Some(id.raw()))
-                        }
-                        Entity::Face(_) => None,
+                    let circle = a.anchors.first().and_then(|anchor| {
+                        ctx.projected.circles.iter().find(|c| c.entity.same_projected_entity(&anchor.entity))
                     });
                     let fresh = circle.and_then(|c| index.namer()?.hole_callout(c, &ctx.projected, symbols));
                     if let Some(fresh) = fresh
@@ -493,6 +686,17 @@ pub fn reattach(
     end: usize,
     entity: EntityRef,
 ) -> Result<(), DrawingError> {
+    reattach_with(drawing, part, id, end, entity, None)
+}
+
+pub(crate) fn reattach_with(
+    drawing: &mut Drawing,
+    part: &Part,
+    id: AnnotationId,
+    end: usize,
+    entity: EntityRef,
+    attachment: Option<Attach>,
+) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let view = drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id))?.view;
     let ctx = ViewContext::compute(drawing, part, &index, view)?;
@@ -502,29 +706,48 @@ pub fn reattach(
     let a = &mut repaired;
     let anchor = a.anchors.get_mut(end).ok_or(DrawingError::BadRequest(format!("{id} has no end {end}")))?;
     anchor.entity = entity;
+    if let Some(attach) = attachment {
+        anchor.attach = attach;
+    }
     // A round takes its centre, a line its middle, unless the end picks a side.
-    if let Resolution::Found(Entity::Edge(edge)) = index.resolve(&anchor.entity)
+    if let Resolution::Found(Entity::Edge(edge)) = project::resolve_in_view(&index, &ctx, &anchor.entity)
         && let Some(curve) = index.edge_curve(edge)
     {
         let round = crate::measure::radius_of(curve).is_some();
-        if round && !matches!(anchor.attach, Attach::Min | Attach::Max) {
+        if attachment.is_none() && matches!(anchor.attach, Attach::EdgeParameter { .. }) {
+            let leg = anchor.entity.section_leg;
+            let xf = ctx.xf.in_leg(leg);
+            let segments = ctx.projected_edges(edge, leg).flat_map(|c| c.path.segments());
+            anchor.attach = project::parameter_on_drawn_edge(&xf, curve, xf.point(curve.point_at(0.5)), segments)
+                .map_or(Attach::Mid, |t| Attach::EdgeParameter { t });
+        }
+        if round && !matches!(anchor.attach, Attach::Min | Attach::Max | Attach::EdgeParameter { .. }) {
             anchor.attach = Attach::Centre;
         } else if !round && matches!(anchor.attach, Attach::Centre | Attach::Silhouette) {
             anchor.attach = Attach::Mid;
+        } else if matches!(anchor.attach, Attach::Point { .. }) {
+            let mid = curve.point_at(0.5);
+            let at = ctx.retained_edge_point(edge, anchor.entity.section_leg, curve, mid, false).unwrap_or(mid);
+            anchor.attach = Attach::Point { at };
         }
-        let g = AnchorGeometry { curve: Some(curve), point: anchor.entity.fingerprint.point, attach: anchor.attach };
+        let unfolded = anchor_curve(&ctx, anchor, Some(curve));
+        let g = anchor_geometry(&ctx.xf, anchor, Some(curve), unfolded.as_deref());
         anchor.cached = ctx.xf.point(anchor_point(&g, &ctx.xf, Default::default()));
     }
     let resolved: Vec<Option<Entity>> = a
         .anchors
         .iter()
-        .map(|x| match index.resolve(&x.entity) {
+        .map(|x| match resolve_anchor(&index, &ctx, x) {
             Resolution::Found(e) => Some(e),
             Resolution::Lost(_) => None,
         })
         .collect();
     if resolved[end].is_none() {
         return Err(DrawingError::BadRequest(format!("the new reference for end {end} of {id} does not resolve")));
+    }
+    let entities: Vec<Entity> = resolved.iter().flatten().copied().collect();
+    if !crate::pmi_items::anchors_on_item(a, &resolved, part, &index) {
+        a.source = None;
     }
     if let AnnotationState::Dangling { lost, cause } = &a.state {
         let lost: Vec<usize> = lost.iter().copied().filter(|i| *i != end && resolved[*i].is_none()).collect();
@@ -534,15 +757,17 @@ pub fn reattach(
             return Ok(());
         }
     }
-    let entities: Vec<Entity> = resolved.into_iter().collect::<Option<_>>().unwrap_or_default();
     if entities.len() == a.anchors.len() {
         // Keep the dimension's last accepted value as the comparison point.
         if let AnnotationState::Dangling { .. } = a.state {
             a.state = AnnotationState::Ok;
         }
-        remeasure(a, &index, &ctx, &entities, &symbols);
+        remeasure(a, &index, &ctx, &entities, &symbols, part);
         if let AnnotationState::Dangling { cause, .. } = &a.state {
             return Err(DrawingError::BadRequest(cause.clone()));
+        }
+        if !crate::pmi_items::repaired_linear_matches(a, &ctx, part, &index)? {
+            a.source = None;
         }
         // Reattaching is a deliberate edit: the value it gives is the accepted one.
         if let AnnotationState::Changed { .. } = a.state {
@@ -557,23 +782,7 @@ pub fn reattach(
 /// window.
 pub fn edge_near(part: &Part, at: soliddraft_kernel_api::Vec3) -> Result<EntityRef, DrawingError> {
     let index = PartIndex::build(part)?;
-    let (id, _) = index
-        .edges()
-        .map(|(id, c)| {
-            (id, c.sample(0.0).windows(2).map(|w| segment_distance(at, w[0], w[1])).fold(f64::INFINITY, f64::min))
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
+    let (id, _) =
+        crate::annotate::nearest_edge(&index, at).ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
     index.edge_ref(id).ok_or(DrawingError::BadRequest("edge vanished".into()))
-}
-
-fn segment_distance(
-    p: soliddraft_kernel_api::Vec3,
-    a: soliddraft_kernel_api::Vec3,
-    b: soliddraft_kernel_api::Vec3,
-) -> f64 {
-    let ab = b - a;
-    let len2 = ab.dot(ab);
-    let t = if len2 > 0.0 { ((p - a).dot(ab) / len2).clamp(0.0, 1.0) } else { 0.0 };
-    p.distance(a + ab * t)
 }

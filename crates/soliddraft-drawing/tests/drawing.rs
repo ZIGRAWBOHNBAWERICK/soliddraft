@@ -124,7 +124,8 @@ fn moving_a_sheet_scale_view_rescales_geometry_annotations_and_descendants() {
             .unwrap();
         let after = d.clone();
         let view = d.view(front).unwrap();
-        let proposal = measure::propose(view, &[measure::Pick { view: front, curve, end: None }], &[]).unwrap();
+        let proposal =
+            measure::propose(view, &[measure::Pick { view: front, curve, end: None, at: None }], &[]).unwrap();
         let value = measure::linear_value(
             LinearOrientation::Horizontal,
             proposal.points[0],
@@ -221,7 +222,7 @@ fn sheet_scale_changes_follow_parent_scale_views_across_sheets() {
         stack.run(&mut d, &Command::SetSheetScale { sheet, scale }, None).unwrap();
         let after = d.clone();
         let view = d.view(top).unwrap();
-        let proposal = measure::propose(view, &[measure::Pick { view: top, curve, end: None }], &[]).unwrap();
+        let proposal = measure::propose(view, &[measure::Pick { view: top, curve, end: None, at: None }], &[]).unwrap();
         let value = measure::linear_value(
             LinearOrientation::Horizontal,
             proposal.points[0],
@@ -321,7 +322,7 @@ fn lost_references_dangle_and_are_repaired_never_deleted() {
         let at = d.sheets[0].annotations[0].anchors[end].entity.fingerprint.point;
         let entity = soliddraft_drawing::edge_near(&other, at).unwrap();
         let mut stack = UndoStack::new();
-        stack.run(&mut d, &Command::Reattach { annotation: first, end, entity }, Some(&other)).unwrap();
+        stack.run(&mut d, &Command::Reattach { annotation: first, end, entity, attach: None }, Some(&other)).unwrap();
     }
     assert_eq!(d.annotation(first).unwrap().state, AnnotationState::Ok);
     let (second, third) = (d.sheets[0].annotations[1].id, d.sheets[0].annotations[2].id);
@@ -456,7 +457,7 @@ fn round_dimension_repairs_reject_straight_edges_without_losing_the_warning() {
         let before = d.clone();
         let result = soliddraft_drawing::apply_with(
             &mut d,
-            &Command::Reattach { annotation: id, end: 0, entity: target.clone() },
+            &Command::Reattach { annotation: id, end: 0, entity: target.clone(), attach: None },
             &part,
         );
         assert!(result.is_err(), "{kind:?} must not attach to a straight edge");

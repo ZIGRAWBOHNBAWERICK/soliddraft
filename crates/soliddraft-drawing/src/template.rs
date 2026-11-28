@@ -37,7 +37,7 @@ impl Template {
         ["iso-a3", "iso-a4", "ansi-a", "ansi-b"]
             .into_iter()
             .map(crate::library::template)
-            .chain(crate::library::library().staged_templates())
+            .chain(crate::library::library().larger_templates())
             .map(crate::library::TemplateFile::template)
             .collect()
     }

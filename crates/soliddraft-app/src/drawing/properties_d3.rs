@@ -6,16 +6,16 @@
 //! table.
 
 use super::properties_drawing::{choice, header, hint, primary_button, section_gap, small_button, value_row};
-use super::{DrawingAction, DrawingSel, DrawingSession, DrawingTool, FinishDraft, GdtDraft, RevisionDraft};
+use super::{CutMode, DrawingAction, DrawingSel, DrawingSession, DrawingTool, FinishDraft, GdtDraft, RevisionDraft};
 use crate::icons::Icon;
 use crate::theme;
 use egui::{Rect, pos2, vec2};
 use soliddraft_drawing::display::{self, scale_text};
 use soliddraft_drawing::library;
-use soliddraft_drawing::project::effective_scale;
+use soliddraft_drawing::project::{effective_scale, view_scale};
 use soliddraft_drawing::{
-    AnnotationKind, Command, DatumRef, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition, RevisionRow,
-    SetKind, SurfaceProcess, TableKind, View, ViewId, ViewKind, ViewScale, next_letter,
+    AnnotationKind, Command, DatumRef, GdtCharacteristic, HalfSection, Lay, LinearOrientation, MaterialCondition,
+    RevisionRow, SetKind, SurfaceProcess, TableKind, View, ViewId, ViewKind, ViewScale, next_letter,
 };
 
 /// A labelled row: the label in the left column, the widget filling the rest.
@@ -71,6 +71,20 @@ pub fn tool_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<D
             actions,
         ),
         DrawingTool::BrokenOut => broken_out_panel(ui, s, actions),
+        DrawingTool::Break => simple_panel(
+            ui,
+            Icon::Rectangle,
+            "Break view",
+            "Click on a view where the stretch to leave out starts, then where it ends. The view closes up to a gap and its dimensions keep the full length. The view's properties remove the breaks.",
+            actions,
+        ),
+        DrawingTool::HalfSection => simple_panel(
+            ui,
+            Icon::Section,
+            "Half section",
+            "Click two points on the symmetry axis of a model or projected view. One half is drawn in section; the view's properties flip which or remove it.",
+            actions,
+        ),
         DrawingTool::DimensionSet(kind) => set_panel(ui, s, kind, actions),
         DrawingTool::Gdt => gdt_panel(ui, s, actions),
         DrawingTool::Datum => datum_panel(ui, s, actions),
@@ -128,16 +142,43 @@ fn section_panel(ui: &mut egui::Ui, s: &mut DrawingSession, replace: Option<View
         let on = replace.and_then(|r| s.doc.drawing.view(r).and_then(|v| v.parent())).or(s.draft.view);
         value_row(ui, "On", &view_name_of(s, on));
         let drawn = !s.draft.points.is_empty() || pending;
-        if choice(ui, s.draft.horizontal, "Horizontal", drawn.then_some("drawn")) {
-            s.draft.horizontal = true;
+        for (mode, label) in [
+            (CutMode::Straight, "Straight"),
+            (CutMode::Offset, "Offset (stepped)"),
+            (CutMode::Aligned, "Aligned (turned)"),
+        ] {
+            if choice(ui, s.draft.cut == mode, label, None) && s.draft.cut != mode && !drawn {
+                s.draft.cut = mode;
+            }
         }
-        if choice(ui, !s.draft.horizontal, "Vertical", drawn.then_some("drawn")) {
-            s.draft.horizontal = false;
+        match s.draft.cut {
+            CutMode::Straight => {
+                if choice(ui, s.draft.horizontal, "Horizontal", drawn.then_some("drawn")) {
+                    s.draft.horizontal = true;
+                }
+                if choice(ui, !s.draft.horizontal, "Vertical", drawn.then_some("drawn")) {
+                    s.draft.horizontal = false;
+                }
+                hint(
+                    ui,
+                    "The first click starts the line; moving the pointer picks horizontal or vertical; the second click finishes it. Circle centres snap.",
+                );
+            }
+            CutMode::Offset => {
+                hint(
+                    ui,
+                    "Click the centres the cut passes through, in order. The line steps square between them; the steps cut nothing. Press Finish when the line is complete.",
+                );
+                let ready = s.draft.points.len() >= 2 && !pending;
+                if ui.add_enabled(ready, egui::Button::new("Finish cutting line")).clicked() {
+                    actions.push(DrawingAction::FinishCut);
+                }
+            }
+            CutMode::Aligned => hint(
+                ui,
+                "Click a point on the first leg, the pivot where the legs meet, then a point on the second leg. The second leg turns about the pivot into the plane of the first.",
+            ),
         }
-        hint(
-            ui,
-            "The first click starts the line; moving the pointer picks horizontal or vertical; the second click finishes it. Circle centres snap.",
-        );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             let flip = egui::Button::new(if s.draft.flip { "Flip direction (flipped)" } else { "Flip direction" });
@@ -200,11 +241,8 @@ fn detail_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
         );
         section_gap(ui);
         theme::section_label(ui, "Scale");
-        let parent_scale = s
-            .draft
-            .view
-            .and_then(|v| s.doc.drawing.sheet_of(v).and_then(|sh| sh.view(v).map(|vw| effective_scale(sh, vw))))
-            .unwrap_or(s.sheet().scale.factor());
+        let parent_scale =
+            s.draft.view.and_then(|v| view_scale(&s.doc.drawing, v).ok()).unwrap_or(s.sheet().scale.factor());
         for f in [2.0, 3.0, 4.0, 5.0] {
             let tag = scale_text(parent_scale * f);
             if choice(ui, (s.draft.factor - f).abs() < 1e-9, &format!("{f}× the parent"), Some(&tag)) {
@@ -629,9 +667,11 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
                 };
                 actions.push(DrawingAction::Command(Command::EditView { view: id, kind }));
             }
-            let cut = match (line.first(), line.last()) {
-                (Some(a), Some(b)) if (a.v - b.v).abs() < 1e-6 => format!("horizontal at y {:.1}", a.v),
-                (Some(a), _) => format!("vertical at x {:.1}", a.u),
+            let cut = match (line.len(), line.first(), line.last()) {
+                (3, ..) => "aligned, 2 legs about a pivot".to_owned(),
+                (n, ..) if n >= 4 => format!("offset, {} parallel cuts", n / 2),
+                (_, Some(a), Some(b)) if (a.v - b.v).abs() < 1e-6 => format!("horizontal at y {:.1}", a.v),
+                (_, Some(a), _) => format!("vertical at x {:.1}", a.u),
                 _ => "none".into(),
             };
             value_row(ui, "Cut", &cut);
@@ -706,8 +746,9 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
                     }
                 });
             }
-            let parent_scale = sheet.view(*parent).map(|p| effective_scale(sheet, p)).unwrap_or(sheet.scale.factor());
-            let own = effective_scale(sheet, v);
+            // Either view may follow a parent on another sheet.
+            let parent_scale = view_scale(&s.doc.drawing, *parent).unwrap_or(sheet.scale.factor());
+            let own = view_scale(&s.doc.drawing, id).unwrap_or_else(|_| effective_scale(sheet, v));
             let mag = own / parent_scale;
             labelled(ui, "Magnify", |ui| {
                 for f in [2.0, 3.0, 4.0, 5.0] {
@@ -781,6 +822,39 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
         });
     }
     section_gap(ui);
+    // Breaks shorten a long view; a half section cuts one side of a symmetric one.
+    if !matches!(v.kind, ViewKind::Detail { .. }) {
+        theme::section_label(ui, "Break and half section");
+        ui.horizontal(|ui| {
+            let tip = "Leave out a stretch of a long view; its dimensions keep the full length";
+            let name = if v.breaks.is_empty() { "Break…" } else { "Edit break…" };
+            if ui.button(name).on_hover_text(tip).clicked() {
+                actions.push(DrawingAction::SetTool(DrawingTool::Break));
+            }
+            if !v.breaks.is_empty() && ui.button("Remove break").clicked() {
+                actions.push(DrawingAction::Command(Command::SetViewBreaks { view: id, breaks: Vec::new() }));
+            }
+        });
+        if matches!(v.kind, ViewKind::Base { .. } | ViewKind::Projected { .. }) {
+            ui.horizontal(|ui| match &v.half {
+                None => {
+                    if ui.button("Half section…").on_hover_text("Cut one side of the symmetry axis").clicked() {
+                        actions.push(DrawingAction::SetTool(DrawingTool::HalfSection));
+                    }
+                }
+                Some(half) => {
+                    if ui.button("Flip half").clicked() {
+                        let half = Some(HalfSection { axis: half.axis, flip: !half.flip });
+                        actions.push(DrawingAction::Command(Command::SetHalfSection { view: id, half }));
+                    }
+                    if ui.button("Remove half section").clicked() {
+                        actions.push(DrawingAction::Command(Command::SetHalfSection { view: id, half: None }));
+                    }
+                }
+            });
+        }
+        section_gap(ui);
+    }
     // Location labels and the sheet the view is on.
     theme::section_label(ui, "Location");
     let labels = display::location_labels(&s.doc.drawing);
@@ -898,7 +972,10 @@ pub fn annotation_body(
                     body: AnnotationKind::RevisionSymbol { revision: r.trim().to_owned() },
                 }));
             }
-            let zone = display::zone_at(s.doc.template(), display_point(s, a));
+            let zone = display::zone_at(
+                soliddraft_drawing::library::template(s.sheet().template.as_str()),
+                display_point(s, a),
+            );
             value_row(ui, "Zone", &zone);
             if ui.button("Revision table…").clicked() {
                 actions.push(DrawingAction::Select(Some(DrawingSel::Revisions)));

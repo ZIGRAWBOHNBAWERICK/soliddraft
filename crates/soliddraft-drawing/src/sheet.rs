@@ -29,9 +29,12 @@ pub struct Sheet {
     /// Title block values that replace the linked document properties, by field key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub format_overrides: BTreeMap<String, String>,
-    /// Title block fields that read a part property, by field key. An override still wins.
+    /// Title block fields that read a part property, by field key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub title_bindings: BTreeMap<String, String>,
+    /// Title block fields placed differently from the template, by field key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_layout: BTreeMap<String, TitleCell>,
     /// Views, parents before their children.
     #[serde(default)]
     pub views: Vec<View>,
@@ -56,6 +59,7 @@ impl Sheet {
             zones: template.zones,
             format_overrides: BTreeMap::new(),
             title_bindings: BTreeMap::new(),
+            title_layout: BTreeMap::new(),
             views: Vec::new(),
             annotations: Vec::new(),
             tables: Vec::new(),
@@ -86,6 +90,33 @@ impl Sheet {
     /// The annotations of view `id`.
     pub fn annotations_of(&self, id: ViewId) -> impl Iterator<Item = &Annotation> {
         self.annotations.iter().filter(move |a| a.view == id)
+    }
+}
+
+/// Where a title block field sits on one sheet, in place of its template cell.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TitleCell {
+    /// `[x, y, width, height]` in millimetres from the title block's bottom-left corner.
+    pub cell: [f64; 4],
+}
+
+impl TitleCell {
+    pub(crate) fn fits(&self, field: &crate::library::FieldDef) -> bool {
+        let [x, y, w, h] = self.cell;
+        let [left, bottom, width, height] = field.cell;
+        let caption = 2.4 + crate::display::text_width(&field.label, 1.8);
+        let min_width = if field.symbol.is_some() { caption.max(17.0) } else { caption };
+        let min_height = (field.size + 5.0).min(height).max(6.8);
+        let symbol_fits = field.symbol.is_none()
+            || crate::display::projection_symbol_fit(self.cell).1 >= crate::display::MIN_SYMBOL_SCALE;
+        [x, y, w, h].iter().all(|v| v.is_finite())
+            && symbol_fits
+            && w >= min_width.min(width) - 1e-9
+            && h >= min_height - 1e-9
+            && x >= left - 1e-9
+            && y >= bottom - 1e-9
+            && x + w <= left + width + 1e-9
+            && y + h <= bottom + height + 1e-9
     }
 }
 

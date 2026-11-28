@@ -40,6 +40,8 @@ mod part;
 pub mod placed;
 pub mod pmi_items;
 pub mod project;
+pub mod review;
+mod section_path;
 mod sheet;
 mod template;
 pub mod text;
@@ -60,7 +62,7 @@ pub use model_items::{ImportReport, ModelDimension, ModelMeasure};
 pub use part::{Entity, Namer, Part, PartIndex, PartSource, Requirements, Resolution, feature_name};
 pub use placed::{PART_VISIBILITY, PlacedBodies, Rigid};
 pub use pmi_items::{PmiReport, Unplaced};
-pub use sheet::{HoleRow, Projection, RevisionRow, Scale, Sheet, Table, TableKind};
+pub use sheet::{HoleRow, Projection, RevisionRow, Scale, Sheet, Table, TableKind, TitleCell};
 pub use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
 pub use template::{DimensionStyle, LineWidths, Margins, PaperSize, Template, TitleBlock, TitleField, ZoneGrid};
 pub use update::{
@@ -68,8 +70,9 @@ pub use update::{
     update_from_model,
 };
 pub use view::{
-    Accuracy, AccuracyCounts, AlignAxis, Alignment, Boundary, BrokenOut, Curve2, CurveKind, FoldDirection, HiddenLines,
-    Orientation, Polygon, TangentEdges, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale,
+    Accuracy, AccuracyCounts, AlignAxis, Alignment, Boundary, Break, BreakGap, BrokenOut, Curve2, CurveKind,
+    FoldDirection, HalfSection, HiddenLines, Orientation, Polygon, TangentEdges, View, ViewDisplay, ViewGeometry,
+    ViewKind, ViewScale,
 };
 
 use serde::{Deserialize, Serialize};
@@ -213,10 +216,10 @@ impl Drawing {
         self.part_notes = part.requirements.notes.clone();
     }
 
-    /// True when every view included in updates shows the drawing's pinned revision.
+    /// True when every printed view included in updates shows the drawing's pinned revision.
     pub fn views_match_pin(&self) -> bool {
         let pinned = self.model.pinned.as_str();
-        self.sheets.iter().flat_map(|s| &s.views).all(|v| v.accepts_revision(pinned))
+        self.sheets.iter().flat_map(|s| &s.views).filter(|v| v.is_printed()).all(|v| v.accepts_revision(pinned))
     }
 
     /// The view with id `id`, on any sheet.
@@ -242,6 +245,11 @@ impl Drawing {
     /// The sheet that holds view `id`.
     pub fn sheet_of(&self, id: ViewId) -> Option<&Sheet> {
         self.sheets.iter().find(|s| s.view(id).is_some())
+    }
+
+    /// The sheet that holds annotation `id`.
+    pub fn sheet_of_annotation(&self, id: AnnotationId) -> Option<&Sheet> {
+        self.sheets.iter().find(|s| s.annotations.iter().any(|a| a.id == id))
     }
 
     /// Annotations that changed or lost references in the last update, sheet by sheet:

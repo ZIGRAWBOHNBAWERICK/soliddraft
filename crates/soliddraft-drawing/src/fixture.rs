@@ -75,6 +75,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
         View {
             id: TOP,
@@ -89,6 +91,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
         View {
             id: LEFT,
@@ -103,6 +107,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
         View {
             id: ISO,
@@ -117,6 +123,8 @@ pub fn bracket_a3() -> Drawing {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         },
     ];
 
@@ -387,13 +395,18 @@ fn view_geometry(view: StandardView, scale: f64, lines: fn(&mut Lines)) -> (View
     let (min, max) = (shift(bounds.origin()), shift(kurbo::Point::new(bounds.x1, bounds.y1)));
     let geometry = ViewGeometry {
         source_digest: DIGEST.to_owned(),
+        transform: Some(crate::project::ViewTransform::new(raw.frame, raw.scale, raw.centre)),
         curves,
         hatch: Vec::new(),
         outline: None,
         bbox: [min.x, min.y, max.x, max.y],
         unproved: false,
+        display_only: false,
         catallax: false,
         coarse: false,
+        breaks: Vec::new(),
+        symmetry_segments: Vec::new(),
+        symmetry_bounds: None,
     };
     (geometry, raw)
 }
@@ -431,7 +444,7 @@ struct Lines {
 
 impl Lines {
     fn push(&mut self, path: BezPath, source: EntityRef, visible: bool, kind: CurveKind) {
-        self.curves.push(Curve2 { path, source, visible, kind, tangent: false, accuracy: Accuracy::Exact });
+        self.curves.push(Curve2 { path, source, visible, kind, tangent: false, accuracy: Accuracy::Exact, ends: None });
     }
 
     fn segment(&self, a: Vec3, b: Vec3) -> BezPath {

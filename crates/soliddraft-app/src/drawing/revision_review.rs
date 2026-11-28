@@ -5,13 +5,17 @@ use std::path::Path;
 
 use soliddraft_kernel_api::pmi::length_text;
 
-use crate::review::{ItemChange, ItemState, ReviewerMarkup, SavedRevision};
+use soliddraft_drawing::review::MarkupPlace;
+
+use crate::review::{ItemChange, ItemState, ReviewerMarkup, SavedDrawing, SavedRevision};
 
 /// The drawing host supplies the file picker and reports file errors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkupFileAction {
     Open,
     SaveAs,
+    /// Show the comment's annotation on its sheet.
+    Show,
 }
 
 #[derive(Debug)]
@@ -74,6 +78,10 @@ pub struct RevisionReview {
     issues: Vec<String>,
     selected: Option<usize>,
     draft: Option<ReviewerMarkup>,
+    /// The saved drawing of the candidate the comments go on, when reviewing a drawing.
+    drawing: Option<SavedDrawing>,
+    /// Where the draft is on that drawing now.
+    place: Option<MarkupPlace>,
 }
 
 impl RevisionReview {
@@ -83,11 +91,34 @@ impl RevisionReview {
             .into_iter()
             .flat_map(|(side, revision)| revision.issues().map(move |(id, reason)| format!("{side} · {id}: {reason}")))
             .collect();
-        Self { candidate, changes, issues, selected: None, draft: None }
+        Self { candidate, changes, issues, selected: None, draft: None, drawing: None, place: None }
+    }
+
+    /// Reviews on a saved drawing: comments go on the annotations that show the items.
+    /// Refused unless the drawing is of the candidate, pinned at its exact revision.
+    pub fn with_drawing(mut self, drawing: SavedDrawing) -> io::Result<Self> {
+        if !drawing.shows(self.candidate.pin()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "The drawing does not show this candidate revision. Rebuild and save it first.",
+            ));
+        }
+        self.drawing = Some(drawing);
+        Ok(self)
     }
 
     pub fn draft(&self) -> Option<&ReviewerMarkup> {
         self.draft.as_ref()
+    }
+
+    /// Where the draft sits on the drawing under review.
+    pub fn place(&self) -> Option<&MarkupPlace> {
+        self.place.as_ref()
+    }
+
+    /// The saved drawing under review.
+    pub fn drawing(&self) -> Option<&SavedDrawing> {
+        self.drawing.as_ref()
     }
 
     /// Reopens a sidecar only if it still applies to this exact saved candidate.
@@ -100,9 +131,23 @@ impl RevisionReview {
                 "Markup does not match this candidate revision or item.",
             ));
         }
+        // A comment written on a drawing opens only on that revision of the drawing.
+        let place = match (&markup.drawing, &self.drawing) {
+            (Some(_), Some(drawing)) => Some(markup.place_on(drawing).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Markup belongs to another revision of this drawing.")
+            })?),
+            (None, Some(_)) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "This markup has no drawing attachment."));
+            }
+            (None, None) => None,
+            (Some(_), None) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Open the drawing to see this markup."));
+            }
+        };
         self.selected =
             markup.item_id.as_deref().and_then(|id| self.changes.binary_search_by(|row| row.id.as_str().cmp(id)).ok());
         self.draft = Some(markup);
+        self.place = place;
         Ok(())
     }
 
@@ -114,7 +159,9 @@ impl RevisionReview {
     }
 
     fn nonempty_draft(&self) -> Option<&ReviewerMarkup> {
-        self.draft.as_ref().filter(|draft| !draft.text.trim().is_empty())
+        self.draft
+            .as_ref()
+            .filter(|draft| !draft.text.trim().is_empty() && (self.drawing.is_none() || self.place.is_some()))
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<MarkupFileAction> {
@@ -150,9 +197,26 @@ impl RevisionReview {
                 ui.label(format!("Candidate − baseline: {delta} mm"));
             }
             if row.after.is_some() {
-                if ui.button("Attach markup to selected item").clicked() {
-                    let text = self.draft.take().map_or_else(String::new, |draft| draft.text);
-                    self.draft = self.candidate.markup(Some(&row.id), text);
+                if ui.button("Attach markup to selected item").clicked()
+                    && let Some(mut markup) = self.candidate.markup(Some(&row.id), String::new())
+                {
+                    let place = if let Some(drawing) = &self.drawing {
+                        match markup.on_drawing(drawing).and_then(|m| Some((m.place_on(drawing)?, m))) {
+                            Some((place, attached)) => {
+                                markup = attached;
+                                Some(place)
+                            }
+                            None => {
+                                ui.label("No drawing annotation shows this item.");
+                                return self.show_editor(ui);
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    markup.text = self.draft.take().map_or_else(String::new, |draft| draft.text);
+                    self.draft = Some(markup);
+                    self.place = place;
                 }
             } else {
                 ui.label("Removed items cannot receive candidate markup.");
@@ -166,6 +230,9 @@ impl RevisionReview {
         ui.heading("Reviewer markup");
         if let Some(draft) = &mut self.draft {
             ui.label(format!("Attached to: {}", draft.item_id.as_deref().unwrap_or("candidate revision")));
+            if let Some(place) = &self.place {
+                ui.label(format!("On drawing sheet {}", place.sheet + 1));
+            }
             let label = ui.label("Comment");
             ui.add(egui::TextEdit::multiline(&mut draft.text).desired_rows(3).desired_width(f32::INFINITY))
                 .labelled_by(label.id);
@@ -178,6 +245,9 @@ impl RevisionReview {
             }
             if ui.add_enabled(self.nonempty_draft().is_some(), egui::Button::new("Save markup as…")).clicked() {
                 return Some(MarkupFileAction::SaveAs);
+            }
+            if self.place.is_some() && ui.button("Show on the sheet").clicked() {
+                return Some(MarkupFileAction::Show);
             }
             None
         })

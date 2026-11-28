@@ -556,3 +556,65 @@ fn pdf_and_dxf_exports_report_the_single_approximate_hatch() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_omitted_display_section_is_current_and_never_blocks_or_counts_in_an_export() {
+    use soliddraft_drawing::{Sheet, ViewKind, library};
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-display-section-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(board_bracket());
+    call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
+    let session = state.drawing.session.as_mut().unwrap();
+    let drawing = &mut session.doc.drawing;
+    let pinned = drawing.model.pinned.clone();
+    let printed = drawing.sheets[0].views.len() as u64;
+    let parent = drawing.sheets[0].views.iter().find(|v| v.parent().is_none()).unwrap();
+    // A section drawn from the display mesh, alone on its own sheet.
+    let mut section = parent.clone();
+    section.id = drawing.next_view_id();
+    section.kind = ViewKind::Section {
+        parent: parent.id,
+        line: vec![],
+        flip: false,
+        label: "B".into(),
+        model_line: vec![],
+        hatch: None,
+    };
+    section.geometry.display_only = true;
+    section.geometry.catallax = false;
+    section.geometry.unproved = false;
+    assert_eq!(section.geometry.source_digest, pinned.as_str());
+    let id = section.id;
+    let mut other = Sheet::from_template("Other", &library::template("iso-a3").template());
+    other.views.push(section);
+    drawing.sheets.push(other);
+    session.sheet = 1;
+    // Current: no status mark, no stale overlay, no rebuild guidance.
+    assert!(session.doc.view_is_up_to_date(session.doc.drawing.view(id).unwrap()));
+    assert!(!session.doc.stale_views().contains(&id));
+
+    let svg = dir.join("display.svg");
+    let report = call(&mut state, "drawing_export_svg", json!({ "path": svg }));
+    assert_eq!((report["views"].as_u64(), report["method"].as_str()), (Some(0), Some("none")), "{report}");
+    assert_eq!(report["view_revisions"], json!([]), "{report}");
+    assert_eq!(report["revision"], Value::Null, "{report}");
+    assert!(!std::fs::read_to_string(&svg).unwrap().contains(r#"<g id="VISIBLE""#), "nothing of the section prints");
+
+    // Put back into updates after a rebuild it missed: it holds an older revision, which
+    // neither blocks the export nor shows in its report.
+    let old = soliddraft_drawing::ContentHash::of_bytes(b"older part");
+    let session = state.drawing.session.as_mut().unwrap();
+    session.doc.drawing.view_mut(id).unwrap().geometry.source_digest = old.as_str().into();
+    let report = call(&mut state, "drawing_export_svg", json!({ "path": svg }));
+    assert_eq!((report["views"].as_u64(), report["method"].as_str()), (Some(0), Some("none")), "{report}");
+    assert_eq!(report["view_revisions"], json!([]), "{report}");
+    let pdf = dir.join("all.pdf");
+    let report = call(&mut state, "drawing_export_pdf", json!({ "path": pdf }));
+    assert_eq!(report["views"].as_u64(), Some(printed), "{report}");
+    assert_eq!(report["revision"], pinned.as_str(), "{report}");
+    assert_eq!(report["view_revisions"], json!([pinned]), "{report}");
+    assert!(pdf.is_file());
+
+    std::fs::remove_dir_all(dir).unwrap();
+}

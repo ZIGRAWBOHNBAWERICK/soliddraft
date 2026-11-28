@@ -31,9 +31,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use kurbo::Shape as _;
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::drawing::{Curve3, CurveSource};
+use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::pmi::{At, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
 use soliddraft_kernel_api::{EdgeId, FaceId, FaceInfo, Point2, SurfaceKind, Vec3};
 use soliddraft_model::pmi::PmiRow;
@@ -45,9 +44,9 @@ use crate::annotation::{
 use crate::display::{self, Item, Owner};
 use crate::ids::{AnnotationId, ViewId};
 use crate::measure::{AnchorGeometry, anchor_point, precision_for};
-use crate::model_items::{plane_edge, visible_in};
-use crate::part::{Part, PartIndex, round};
-use crate::project::ViewContext;
+use crate::model_items::plane_edge;
+use crate::part::{Entity, Part, PartIndex, Resolution, round};
+use crate::project::{ViewContext, ViewTransform};
 use crate::{Drawing, DrawingError};
 
 /// What bringing the part's items onto a sheet did.
@@ -97,7 +96,76 @@ struct Body<'a> {
     tol: f64,
 }
 
-impl Body<'_> {
+impl<'a> Body<'a> {
+    fn new(part: &Part, index: &'a PartIndex<'a>) -> Result<Self, DrawingError> {
+        let topology = part.geometry.topology()?;
+        let size = topology.faces.iter().fold(1.0_f64, |size, face| size.max(face.bbox.max.distance(face.bbox.min)));
+        let axes = part.geometry.face_carriers()?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
+        Ok(Self { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), axes, index, tol: 1e-6 * size })
+    }
+
+    fn end(&self, anchor: &soliddraft_kernel_api::pmi::Anchor<FaceId>) -> Result<End, String> {
+        let shape = self.feature(&anchor.feature)?;
+        let pair = anchor.feature.get(1).and_then(|face| self.face(*face));
+        Ok(End { shape, faces: anchor.feature.clone(), at: anchor.at, pair })
+    }
+
+    fn width_end(&self, faces: &[FaceId]) -> Result<End, String> {
+        Ok(End { shape: self.feature(faces)?, faces: faces.to_vec(), at: At::Feature, pair: None })
+    }
+
+    fn linear_matches(&self, annotation: &Annotation, ctx: &ViewContext, kind: &PmiKind<FaceId>) -> Option<bool> {
+        let (from, to) = match kind {
+            PmiKind::Location { from, to, .. } => (self.end(from).ok()?, self.end(to).ok()?),
+            PmiKind::Width { flats: [a, b], .. } => (self.width_end(a).ok()?, self.width_end(b).ok()?),
+            _ => return Some(true),
+        };
+        let [first, second] = annotation.anchors.as_slice() else { return Some(false) };
+        let (direction, towards) = linear_axis(&from, &to)?;
+        // The dimension still lies the way it would be drawn in this view now.
+        let frame = ctx.xf.in_leg(first.entity.section_leg).frame;
+        let orientation = if direction.dot(frame.right).abs() > 1.0 - 1e-6 {
+            LinearOrientation::Horizontal
+        } else if direction.dot(frame.up).abs() > 1.0 - 1e-6 {
+            LinearOrientation::Vertical
+        } else {
+            return Some(false);
+        };
+        if !matches!(&annotation.body, AnnotationKind::Dimension(d) if d.kind == (DimensionKind::Linear { orientation }))
+        {
+            return Some(false);
+        }
+        let matches = |anchor: &Anchor, end: &End, sign| {
+            let leg = anchor.entity.section_leg;
+            let view = PmiView { ctx, id: ctx.id, xf: ctx.xf.in_leg(leg), leg };
+            let (_, _, wanted, _, _) = self.end_anchor(end, &view, direction, sign, None)?;
+            let (du, dv) = (wanted.u - anchor.cached.u, wanted.v - anchor.cached.v);
+            let off = match end.shape {
+                // A flat end may sit anywhere along its edge: only its place along the
+                // measuring direction counts.
+                Shape::Plane { .. } => {
+                    let axis = unit(view.xf.vector(direction));
+                    (du * axis.u + dv * axis.v).abs()
+                }
+                // A round end has one station, on any of its rims: only a shift along
+                // the round's own axis is free.
+                Shape::Round { axis, .. } => {
+                    let along = view.xf.vector(axis);
+                    let length = along.u.hypot(along.v);
+                    if length > 1e-9 * view.xf.scale {
+                        let (u, v) = (along.u / length, along.v / length);
+                        let slide = du * u + dv * v;
+                        (du - slide * u).hypot(dv - slide * v)
+                    } else {
+                        du.hypot(dv)
+                    }
+                }
+            };
+            Some(off <= 1e-6 * view.xf.scale + 1e-6)
+        };
+        Some(matches(first, &from, towards)? && matches(second, &to, -towards)?)
+    }
+
     /// The shape of a face: a plane, or a cylinder read off a round edge of the face.
     fn face(&self, face: FaceId) -> Option<Shape> {
         let info = self.faces.get(&face)?;
@@ -123,7 +191,13 @@ impl Body<'_> {
     /// annotation attaches to stand at its centre, that centre, and whether the view
     /// shows the edge as a visible line. Visible first, then nearest the eye. A round
     /// edge is any edge of the feature's faces but the straight ones along the axis.
-    fn round_edge(&self, feature: &[FaceId], view: &ViewContext, axis: Vec3) -> Option<(EdgeId, Attach, Vec3, bool)> {
+    fn round_edge(
+        &self,
+        feature: &[FaceId],
+        view: &PmiView<'_>,
+        axis: Vec3,
+        needs_centre: bool,
+    ) -> Option<(EdgeId, Attach, Vec3, bool)> {
         let mut best: Option<((bool, f64), EdgeId, Attach, Vec3)> = None;
         for face in feature {
             for edge in &self.faces.get(face)?.edges {
@@ -137,13 +211,80 @@ impl Body<'_> {
                         (Attach::Point { at: centre }, centre)
                     }
                 };
-                let key = (visible_in(view, *edge), view.xf.frame.depth(centre));
+                if needs_centre && !view.xf.retains(centre) {
+                    continue;
+                }
+                let Some(visible) = view.ctx.edge_visibility(*edge, view.leg) else { continue };
+                let key = (visible, view.xf.frame.depth(centre));
                 if best.as_ref().is_none_or(|(k, ..)| (key.0, key.1) > (k.0, k.1 + self.tol)) {
                     best = Some((key, *edge, attach, centre));
                 }
             }
         }
         best.map(|(key, edge, attach, centre)| (edge, attach, centre, key.0))
+    }
+
+    /// The anchor of one end of a distance in a view: the edge, where on it, the point
+    /// in the view, whether the view shows the edge as a visible line and whether it
+    /// sees a round end face on. `lean` is the direction across the measuring one that
+    /// the dimension line lies in; with it a flat end is taken at its near end, so
+    /// extension lines start where the dimension is. Without it, at its middle.
+    fn end_anchor(
+        &self,
+        end: &End,
+        view: &PmiView<'_>,
+        direction: Vec3,
+        towards: f64,
+        lean: Option<Point2>,
+    ) -> Option<(EdgeId, Attach, Point2, bool, bool)> {
+        match end.shape {
+            Shape::Plane { point, normal } => {
+                let (edge, visible) = view.plane_edge(self, &end.faces, point, normal)?;
+                let curve = self.index.edge_curve(edge)?;
+                let near = match lean {
+                    None => Attach::Mid,
+                    Some(lean) => match curve {
+                        Curve3::Line { .. } => {
+                            let along = |p: Vec3| {
+                                let q = view.xf.point(p);
+                                q.u * lean.u + q.v * lean.v
+                            };
+                            if along(curve.end()) > along(curve.start()) { Attach::End } else { Attach::Start }
+                        }
+                        _ => Attach::Max,
+                    },
+                };
+                let across = lean.unwrap_or(Point2::new(0.0, 1.0));
+                let at_near = anchor_point(
+                    &AnchorGeometry { curve: Some(curve), point: Vec3::ZERO, attach: near },
+                    &view.xf,
+                    across,
+                );
+                let (attach, model) = match (end.at, end.pair) {
+                    (At::Middle, Some(Shape::Plane { point: other, .. })) => {
+                        let at = at_near + normal * ((other - point).dot(normal) / 2.0);
+                        (Attach::Point { at }, at)
+                    }
+                    _ => (near, at_near),
+                };
+                Some((edge, attach, view.xf.point(model), visible, false))
+            }
+            Shape::Round { axis, radius, .. } => {
+                let needs_centre = !matches!(end.at, At::Inner | At::Outer);
+                let (edge, centred, on_axis, visible) = self.round_edge(&end.faces, view, axis, needs_centre)?;
+                let attach = match end.at {
+                    At::Inner => Attach::Point { at: on_axis + direction * (radius * towards) },
+                    At::Outer => Attach::Point { at: on_axis - direction * (radius * towards) },
+                    _ => centred,
+                };
+                let model = match attach {
+                    Attach::Point { at } => at,
+                    _ => on_axis,
+                };
+                let face_on = axis.dot(view.xf.frame.direction).abs() > 1.0 - 1e-6;
+                view.xf.retains(model).then(|| (edge, attach, view.xf.point(model), visible, face_on))
+            }
+        }
     }
 }
 
@@ -156,10 +297,35 @@ struct Slide {
     step: f64,
 }
 
+#[derive(Clone, Copy)]
+struct PmiView<'a> {
+    ctx: &'a ViewContext,
+    id: ViewId,
+    xf: ViewTransform,
+    leg: u8,
+}
+
+impl PmiView<'_> {
+    fn plane_edge(&self, body: &Body<'_>, feature: &[FaceId], point: Vec3, normal: Vec3) -> Option<(EdgeId, bool)> {
+        plane_edge(body.index, self.ctx, point, normal, body.tol, self.leg, |faces| {
+            faces.iter().any(|face| feature.contains(face))
+        })
+    }
+
+    fn point_on_edge(&self, edge: EdgeId, curve: &Curve3, at: Vec3, visible: bool) -> Option<Vec3> {
+        if visible || self.ctx.has_restricted_edges() {
+            self.ctx.retained_edge_point(edge, self.leg, curve, at, visible)
+        } else {
+            Some(at)
+        }
+    }
+}
+
 /// One annotation before it is on the sheet.
 struct Plan {
     source: PmiSource,
     view: ViewId,
+    leg: u8,
     body: AnnotationKind,
     anchors: Vec<(EdgeId, Attach, Point2)>,
     placement: Point2,
@@ -192,7 +358,7 @@ struct End {
 
 struct Planner<'a> {
     body: Body<'a>,
-    views: Vec<&'a ViewContext>,
+    views: Vec<PmiView<'a>>,
     bbox: BTreeMap<ViewId, [f64; 4]>,
     plans: Vec<Plan>,
     /// Diagonals taken around each round centre, by view.
@@ -221,7 +387,24 @@ fn unit(p: Point2) -> Point2 {
     if length > 1e-12 { Point2::new(p.u / length, p.v / length) } else { Point2::new(0.0, 1.0) }
 }
 
-impl Planner<'_> {
+fn linear_axis(from: &End, to: &End) -> Option<(Vec3, f64)> {
+    let position = |end: &End| match end.shape {
+        Shape::Plane { point, .. } => point,
+        Shape::Round { centre, .. } => centre,
+    };
+    let direction = match (from.shape, to.shape) {
+        (Shape::Plane { normal, .. }, _) | (_, Shape::Plane { normal, .. }) => normal,
+        (Shape::Round { axis, .. }, Shape::Round { .. }) => {
+            let between = position(to) - position(from);
+            (between - axis * between.dot(axis)).normalized()?
+        }
+    };
+    // From the first end towards the second.
+    let towards = if (position(to) - position(from)).dot(direction) >= 0.0 { 1.0 } else { -1.0 };
+    Some((direction, towards))
+}
+
+impl<'a> Planner<'a> {
     /// The diagonals of a view in the order callouts take them: those that point at
     /// no stack of dimensions first, and of those the right-hand ones, so a frame can
     /// sit under the text.
@@ -257,24 +440,24 @@ impl Planner<'_> {
         features: &[&[FaceId]],
         axis: Vec3,
         radius: f64,
-    ) -> Result<(ViewId, EdgeId, Attach, Point2, Point2, Point2), String> {
+    ) -> Result<(PmiView<'a>, EdgeId, Attach, Point2, Point2, Point2), String> {
         let first = features.first().copied().ok_or("it is on no feature")?;
-        let mut best: Option<((bool, i32), &ViewContext)> = None;
+        let mut best: Option<((bool, i32), PmiView<'_>)> = None;
         for (order, view) in self.views.iter().enumerate() {
             if axis.dot(view.xf.frame.direction).abs() < 1.0 - 1e-6 {
                 continue;
             }
-            let Some((_, _, _, visible)) = self.body.round_edge(first, view, axis) else { continue };
+            let Some((_, _, _, visible)) = self.body.round_edge(first, view, axis, true) else { continue };
             let key = (visible, -(order as i32));
             if best.as_ref().is_none_or(|(k, _)| key > *k) {
-                best = Some((key, view));
+                best = Some((key, *view));
             }
         }
         let (_, view) = best.ok_or("no view looks along its axis")?;
         let lead = self.diagonals(view.id)[0];
         let mut chosen: Option<(f64, EdgeId, Attach, Point2)> = None;
         for feature in features {
-            let Some((edge, attach, centre, _)) = self.body.round_edge(feature, view, axis) else { continue };
+            let Some((edge, attach, centre, _)) = self.body.round_edge(feature, &view, axis, true) else { continue };
             let at = view.xf.point(centre);
             let out = at.u * f64::from(lead.0) + at.v * f64::from(lead.1);
             if chosen.as_ref().is_none_or(|(o, ..)| out > *o + 1e-9) {
@@ -286,7 +469,7 @@ impl Planner<'_> {
         let dir = self.diagonal(id, centre);
         let reach = radius * scale + CALLOUT_REACH;
         let placement = Point2::new(round(centre.u + dir.u * reach), round(centre.v + dir.v * reach));
-        Ok((id, edge, attach, centre, placement, dir))
+        Ok((view, edge, attach, centre, placement, dir))
     }
 
     /// The outward side of a view at a point: the unit direction to the nearest side of
@@ -301,17 +484,23 @@ impl Planner<'_> {
 
     /// A symbol on the line a flat face shows as: the view, the edge, the point on it and
     /// the outward direction.
-    fn on_line(&mut self, point: Vec3, normal: Vec3) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
-        self.on_planar_edge(point, normal, false)
+    fn on_line(
+        &mut self,
+        feature: &[FaceId],
+        point: Vec3,
+        normal: Vec3,
+    ) -> Result<(PmiView<'a>, EdgeId, Attach, Point2, Point2), String> {
+        self.on_planar_edge(feature, point, normal, false)
     }
 
     fn on_planar_edge(
         &mut self,
+        feature: &[FaceId],
         point: Vec3,
         normal: Vec3,
         oblique: bool,
-    ) -> Result<(ViewId, EdgeId, Attach, Point2, Point2), String> {
-        let mut best: Option<((bool, i32, i32), &ViewContext, EdgeId)> = None;
+    ) -> Result<(PmiView<'a>, EdgeId, Attach, Point2, Point2), String> {
+        let mut best: Option<((bool, i32, i32), PmiView<'_>, EdgeId)> = None;
         for (order, view) in self.views.iter().enumerate() {
             let frame = &view.xf.frame;
             if normal.dot(frame.direction).abs() > 1e-6 {
@@ -320,87 +509,26 @@ impl Planner<'_> {
             if !oblique && normal.dot(frame.right).abs() < 1.0 - 1e-6 && normal.dot(frame.up).abs() < 1.0 - 1e-6 {
                 continue;
             }
-            let Some((edge, visible)) = plane_edge(self.body.index, view, point, normal, self.body.tol) else {
+            let Some((edge, visible)) = view.plane_edge(&self.body, feature, point, normal) else {
                 continue;
             };
             // A visible line first, then the view with the fewest annotations so far.
             let key = (visible, -self.planned_in(view.id), -(order as i32));
             if best.as_ref().is_none_or(|(k, ..)| key > *k) {
-                best = Some((key, view, edge));
+                best = Some((key, *view, edge));
             }
         }
-        let (_, view, edge) = best.ok_or("no view sees the face edge on")?;
+        let ((visible, ..), view, edge) = best.ok_or("no view sees the face edge on")?;
         let curve = self.body.index.edge_curve(edge).ok_or("the edge is gone")?;
         let taken = self.on_edge.entry((view.id, edge)).or_default();
         let fraction = [0.25, 0.7, 0.5, 0.1, 0.9][*taken % 5];
         *taken += 1;
-        let at = curve.point_at(fraction);
+        let at =
+            view.point_on_edge(edge, curve, curve.point_at(fraction), visible).ok_or("no point on the drawn edge")?;
         let on = view.xf.point(at);
         let across = unit(view.xf.vector(normal));
         let out = self.outward(view.id, on, across);
-        Ok((view.id, edge, Attach::Point { at }, on, out))
-    }
-
-    /// The anchor of one end of a distance in a view: the edge, where on it, the point
-    /// in the view, whether the view shows the edge as a visible line and whether it
-    /// sees a round end face on. `lean` is the direction across the measuring one that
-    /// the dimension line lies in; with it a flat end is taken at its near end, so
-    /// extension lines start where the dimension is. Without it, at its middle.
-    fn end_anchor(
-        &self,
-        end: &End,
-        view: &ViewContext,
-        direction: Vec3,
-        towards: f64,
-        lean: Option<Point2>,
-    ) -> Option<(EdgeId, Attach, Point2, bool, bool)> {
-        match end.shape {
-            Shape::Plane { point, normal } => {
-                let (edge, visible) = plane_edge(self.body.index, view, point, normal, self.body.tol)?;
-                let curve = self.body.index.edge_curve(edge)?;
-                let near = match lean {
-                    None => Attach::Mid,
-                    Some(lean) => match curve {
-                        Curve3::Line { .. } => {
-                            let along = |p: Vec3| {
-                                let q = view.xf.point(p);
-                                q.u * lean.u + q.v * lean.v
-                            };
-                            if along(curve.end()) > along(curve.start()) { Attach::End } else { Attach::Start }
-                        }
-                        _ => Attach::Max,
-                    },
-                };
-                let across = lean.unwrap_or(Point2::new(0.0, 1.0));
-                let at_near = anchor_point(
-                    &AnchorGeometry { curve: Some(curve), point: Vec3::ZERO, attach: near },
-                    &view.xf,
-                    across,
-                );
-                let (attach, model) = match (end.at, end.pair) {
-                    (At::Middle, Some(Shape::Plane { point: other, .. })) => {
-                        let at = at_near + normal * ((other - point).dot(normal) / 2.0);
-                        (Attach::Point { at }, at)
-                    }
-                    _ => (near, at_near),
-                };
-                Some((edge, attach, view.xf.point(model), visible, false))
-            }
-            Shape::Round { axis, radius, .. } => {
-                let (edge, centred, on_axis, visible) = self.body.round_edge(&end.faces, view, axis)?;
-                let attach = match end.at {
-                    At::Inner => Attach::Point { at: on_axis + direction * (radius * towards) },
-                    At::Outer => Attach::Point { at: on_axis - direction * (radius * towards) },
-                    _ => centred,
-                };
-                let model = match attach {
-                    Attach::Point { at } => at,
-                    _ => on_axis,
-                };
-                let face_on = axis.dot(view.xf.frame.direction).abs() > 1.0 - 1e-6;
-                Some((edge, attach, view.xf.point(model), visible, face_on))
-            }
-        }
+        Ok((view, edge, Attach::Point { at }, on, out))
     }
 
     /// A linear dimension between two ends.
@@ -416,19 +544,7 @@ impl Planner<'_> {
         value: f64,
         tolerance: Tolerance,
     ) -> Result<(), String> {
-        let position = |end: &End| match end.shape {
-            Shape::Plane { point, .. } => point,
-            Shape::Round { centre, .. } => centre,
-        };
-        let direction = match (from.shape, to.shape) {
-            (Shape::Plane { normal, .. }, _) | (_, Shape::Plane { normal, .. }) => normal,
-            (Shape::Round { axis, .. }, Shape::Round { .. }) => {
-                let between = position(to) - position(from);
-                (between - axis * between.dot(axis)).normalized().ok_or("its two ends share an axis")?
-            }
-        };
-        // From the first end towards the second.
-        let towards = if (position(to) - position(from)).dot(direction) >= 0.0 { 1.0 } else { -1.0 };
+        let (direction, towards) = linear_axis(from, to).ok_or("its two ends share an axis")?;
         let mut best: Option<(i32, Plan)> = None;
         for (order, view) in self.views.iter().enumerate() {
             let frame = &view.xf.frame;
@@ -443,8 +559,8 @@ impl Planner<'_> {
                 continue;
             };
             let (Some(a), Some(b)) = (
-                self.end_anchor(from, view, direction, towards, None),
-                self.end_anchor(to, view, direction, -towards, None),
+                self.body.end_anchor(from, view, direction, towards, None),
+                self.body.end_anchor(to, view, direction, -towards, None),
             ) else {
                 continue;
             };
@@ -465,8 +581,8 @@ impl Planner<'_> {
             };
             let across = if vertical { Point2::new(f64::from(side), 0.0) } else { Point2::new(0.0, f64::from(side)) };
             let (Some(a), Some(b)) = (
-                self.end_anchor(from, view, direction, towards, Some(across)),
-                self.end_anchor(to, view, direction, -towards, Some(across)),
+                self.body.end_anchor(from, view, direction, towards, Some(across)),
+                self.body.end_anchor(to, view, direction, -towards, Some(across)),
             ) else {
                 continue;
             };
@@ -483,6 +599,7 @@ impl Planner<'_> {
             let plan = Plan {
                 source: source.clone(),
                 view: view.id,
+                leg: view.leg,
                 body: AnnotationKind::Dimension(dimension),
                 anchors: vec![(a.0, a.1, a.2), (b.0, b.1, b.2)],
                 placement: Point2::default(),
@@ -514,7 +631,11 @@ impl Planner<'_> {
                 if alignment <= 1e-6 {
                     return None;
                 }
-                info.edges.iter().copied().find(|edge| visible_in(view, *edge)).map(|edge| (alignment, *view, edge))
+                info.edges
+                    .iter()
+                    .copied()
+                    .find(|edge| view.ctx.edge_visibility(*edge, view.leg) == Some(true))
+                    .map(|edge| (alignment, *view, edge))
             })
             .max_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, view, edge)| (view, edge))
@@ -524,6 +645,7 @@ impl Planner<'_> {
         self.plans.push(Plan {
             source,
             view: view.id,
+            leg: view.leg,
             body: datum_target_body(target),
             anchors: vec![(edge, Attach::Point { at: point }, on)],
             placement: Point2::new(round(on.u + dir.u * SYMBOL_OFFSET), round(on.v + dir.v * SYMBOL_OFFSET)),
@@ -543,28 +665,29 @@ impl Planner<'_> {
         for view in &self.views {
             let axial = axis.is_some_and(|axis| axis.direction.dot(view.xf.frame.direction).abs() > 1.0 - 1e-6);
             let load = -self.planned_in(view.id);
-            for curve in &view.curves.curves {
-                let CurveSource::Edge(edge) = curve.source else { continue };
-                if !curve.visible || !edges.contains(&edge) {
+            for &edge in edges {
+                if view.ctx.edge_visibility(edge, view.leg) != Some(true) {
                     continue;
                 }
-                let at = curve.curve.point_at(0.5);
+                let Some(curve) = self.body.index.edge_curve(edge) else { continue };
+                let Some(at) = view.point_on_edge(edge, curve, curve.point_at(0.5), true) else { continue };
                 let on = view.xf.point(at);
-                let start = view.xf.point(curve.curve.start());
-                let end = view.xf.point(curve.curve.end());
+                let start = view.xf.point(curve.start());
+                let end = view.xf.point(curve.end());
                 let extent = (start.u - on.u).hypot(start.v - on.v) + (end.u - on.u).hypot(end.v - on.v);
                 let key = (axial, load, extent);
                 if extent > self.body.tol * view.xf.scale && key > best_key {
                     best_key = key;
-                    best = Some((view.id, edge, at, on));
+                    best = Some((*view, edge, at, on));
                 }
             }
         }
         let (view, edge, at, on) = best.ok_or("no view shows a visible edge of its face")?;
-        let dir = self.diagonal(view, on);
+        let dir = self.diagonal(view.id, on);
         self.plans.push(Plan {
             source,
-            view,
+            view: view.id,
+            leg: view.leg,
             body: AnnotationKind::Note { text, leader: Vec::new() },
             anchors: vec![(edge, Attach::Point { at }, on)],
             placement: Point2::new(round(on.u + dir.u * SYMBOL_OFFSET), round(on.v + dir.v * SYMBOL_OFFSET)),
@@ -595,10 +718,11 @@ impl Planner<'_> {
         match &item.kind {
             PmiKind::Datum { letter, feature } => match self.body.feature(feature)? {
                 Shape::Plane { point, normal } => {
-                    let (view, edge, attach, on, out) = self.on_line(point, normal)?;
+                    let (view, edge, attach, on, out) = self.on_line(feature, point, normal)?;
                     self.plans.push(Plan {
                         source,
-                        view,
+                        view: view.id,
+                        leg: view.leg,
                         body: AnnotationKind::Datum { letter: letter.clone() },
                         anchors: vec![(edge, attach, on)],
                         placement: Point2::new(
@@ -613,14 +737,15 @@ impl Planner<'_> {
                 }
                 Shape::Round { axis, radius, .. } => {
                     let (view, edge, _, centre, placement, dir) = self.callout(&[feature.as_slice()], axis, radius)?;
-                    let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                    let scale = view.xf.scale;
                     let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
-                    let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                    let at = view.xf.unproject(on);
                     self.plans.push(Plan {
                         source,
-                        view,
+                        view: view.id,
+                        leg: view.leg,
                         body: AnnotationKind::Datum { letter: letter.clone() },
-                        anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                        anchors: vec![(edge, Attach::Point { at }, on)],
                         placement,
                         slide: Slide { along: dir, step: 3.0 },
                         host: None,
@@ -637,9 +762,9 @@ impl Planner<'_> {
                 let all: Vec<&[FaceId]> = features.iter().map(Vec::as_slice).collect();
                 // The leader reaches the wall on the side callouts go, as a slot's does.
                 let (view, edge, _, centre, placement, dir) = self.callout(&all, axis, radius)?;
-                let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                let scale = view.xf.scale;
                 let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
-                let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                let at = view.xf.unproject(on);
                 let text =
                     thread_text(features.len(), thread, *through, row.depth, &self.times, &self.through, &self.depth);
                 if let Some(face) = first.first() {
@@ -652,9 +777,10 @@ impl Planner<'_> {
                 let source = source_on(row, placement_on_wall);
                 self.plans.push(Plan {
                     source,
-                    view,
+                    view: view.id,
+                    leg: view.leg,
                     body: AnnotationKind::Note { text, leader: Vec::new() },
-                    anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                    anchors: vec![(edge, Attach::Point { at }, on)],
                     placement,
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
@@ -669,9 +795,10 @@ impl Planner<'_> {
                 };
                 let all: Vec<&[FaceId]> = features.iter().map(Vec::as_slice).collect();
                 let (view, edge, centred, centre, placement, dir) = self.callout(&all, axis, radius)?;
-                let (kind, value) = match size {
-                    SizeKind::Diameter => (DimensionKind::Diameter, 2.0 * radius),
-                    SizeKind::Radius => (DimensionKind::Radius, radius),
+                let kind = size_dimension_kind(*size);
+                let value = match size {
+                    SizeKind::Diameter => 2.0 * radius,
+                    SizeKind::Radius => radius,
                 };
                 let value = row.measured.first().copied().unwrap_or(value);
                 let mut dimension = Dimension::measured(kind, value, precision_for(value));
@@ -683,7 +810,8 @@ impl Planner<'_> {
                 }
                 self.plans.push(Plan {
                     source,
-                    view,
+                    view: view.id,
+                    leg: view.leg,
                     body: AnnotationKind::Dimension(dimension),
                     anchors: vec![(edge, centred, centre)],
                     placement,
@@ -710,17 +838,18 @@ impl Planner<'_> {
                     Some(Curve3::Circle { radius, .. } | Curve3::Arc { radius, .. }) => *radius,
                     _ => outer_radius,
                 };
-                let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                let scale = view.xf.scale;
                 let on = Point2::new(centre.u + dir.u * rim_radius * scale, centre.v + dir.v * rim_radius * scale);
-                let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                let at = view.xf.unproject(on);
                 if let Some(face) = pilot.first() {
                     self.sizes.insert(*face, self.plans.len());
                 }
                 self.plans.push(Plan {
                     source,
-                    view,
+                    view: view.id,
+                    leg: view.leg,
                     body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
-                    anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                    anchors: vec![(edge, Attach::Point { at }, on)],
                     placement,
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
@@ -729,30 +858,23 @@ impl Planner<'_> {
                 });
             }
             PmiKind::Location { from, to, tolerance, .. } => {
-                let end = |anchor: &soliddraft_kernel_api::pmi::Anchor<FaceId>| -> Result<End, String> {
-                    let shape = self.body.feature(&anchor.feature)?;
-                    let pair = anchor.feature.get(1).and_then(|face| self.body.face(*face));
-                    Ok(End { shape, faces: anchor.feature.clone(), at: anchor.at, pair })
-                };
-                let (from, to) = (end(from)?, end(to)?);
+                let (from, to) = (self.body.end(from)?, self.body.end(to)?);
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
                 self.linear(None, source, &from, &to, value, *tolerance)?;
             }
             PmiKind::Width { flats: [a, b], tolerance } => {
-                let end = |faces: &[FaceId]| -> Result<End, String> {
-                    Ok(End { shape: self.body.feature(faces)?, faces: faces.to_vec(), at: At::Feature, pair: None })
-                };
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
-                self.linear(None, source, &end(a)?, &end(b)?, value, *tolerance)?;
+                self.linear(None, source, &self.body.width_end(a)?, &self.body.width_end(b)?, value, *tolerance)?;
             }
             PmiKind::Chamfer { bevel, .. } | PmiKind::EdgeBreak { bevel, .. } => {
                 let Shape::Plane { point, normal } = self.body.feature(bevel)? else {
                     return Err("the callout needs a planar face".into());
                 };
-                let (view, edge, attach, on, out) = self.on_planar_edge(point, normal, true)?;
+                let (view, edge, attach, on, out) = self.on_planar_edge(bevel, point, normal, true)?;
                 self.plans.push(Plan {
                     source,
-                    view,
+                    view: view.id,
+                    leg: view.leg,
                     body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
                     anchors: vec![(edge, attach, on)],
                     placement: Point2::new(round(on.u + out.u * SYMBOL_OFFSET), round(on.v + out.v * SYMBOL_OFFSET)),
@@ -768,25 +890,32 @@ impl Planner<'_> {
                     _ => Err("an angle needs two planes".to_owned()),
                 };
                 let ((p, n), (q, m)) = (flat(first)?, flat(second)?);
-                let mut best: Option<((u8, i32), &ViewContext, EdgeId, EdgeId)> = None;
+                type Candidate<'view> = ((u8, i32), PmiView<'view>, [(EdgeId, bool); 2]);
+                let mut best: Option<Candidate<'_>> = None;
                 for view in self.views.iter().copied() {
                     let frame = &view.xf.frame;
                     if n.dot(frame.direction).abs() > 1e-6 || m.dot(frame.direction).abs() > 1e-6 {
                         continue;
                     }
-                    let edge = |point, normal| plane_edge(self.body.index, view, point, normal, self.body.tol);
-                    let (Some((a, av)), Some((b, bv))) = (edge(p, n), edge(q, m)) else { continue };
+                    let (Some((a, av)), Some((b, bv))) =
+                        (view.plane_edge(&self.body, first, p, n), view.plane_edge(&self.body, second, q, m))
+                    else {
+                        continue;
+                    };
                     if a == b {
                         continue;
                     }
                     let key = (u8::from(av) + u8::from(bv), -self.planned_in(view.id));
                     if best.as_ref().is_none_or(|(score, ..)| key > *score) {
-                        best = Some((key, view, a, b));
+                        best = Some((key, view, [(a, av), (b, bv)]));
                     }
                 }
-                let (_, view, a, b) = best.ok_or("no view sees both angle faces edge on")?;
-                let anchor = |edge| -> Result<_, String> {
-                    let at = self.body.index.edge_curve(edge).ok_or("the edge is gone")?.point_at(0.5);
+                let (_, view, [a, b]) = best.ok_or("no view sees both angle faces edge on")?;
+                let anchor = |(edge, visible): (EdgeId, bool)| -> Result<_, String> {
+                    let curve = self.body.index.edge_curve(edge).ok_or("the edge is gone")?;
+                    let at = view
+                        .point_on_edge(edge, curve, curve.point_at(0.5), visible)
+                        .ok_or("no point on the drawn edge")?;
                     Ok((edge, Attach::Point { at }, view.xf.point(at)))
                 };
                 let (first, second) = (anchor(a)?, anchor(b)?);
@@ -799,6 +928,7 @@ impl Planner<'_> {
                 self.plans.push(Plan {
                     source,
                     view: view.id,
+                    leg: view.leg,
                     body: AnnotationKind::Dimension(d),
                     anchors: vec![first, second],
                     placement: Point2::new(round(on.u + out.u * SYMBOL_OFFSET), round(on.v + out.v * SYMBOL_OFFSET)),
@@ -815,14 +945,15 @@ impl Planner<'_> {
                 // The leader reaches the end on the side callouts go, so it lands on the round.
                 let (view, edge, _, centre, placement, dir) =
                     self.callout(&[ends[0].as_slice(), ends[1].as_slice()], axis, radius)?;
-                let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                let scale = view.xf.scale;
                 let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
-                let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                let at = view.xf.unproject(on);
                 self.plans.push(Plan {
                     source,
-                    view,
+                    view: view.id,
+                    leg: view.leg,
                     body: AnnotationKind::Note { text: row.callout(), leader: Vec::new() },
-                    anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                    anchors: vec![(edge, Attach::Point { at }, on)],
                     placement,
                     slide: Slide { along: dir, step: 3.0 },
                     host: None,
@@ -838,14 +969,14 @@ impl Planner<'_> {
                 };
                 let groups: Vec<_> = control.features.iter().map(Vec::as_slice).collect();
                 let (view, edge, _, centre, placement, dir) = self.callout(&groups, axis, radius)?;
-                let context = self.views.iter().find(|item| item.id == view).ok_or("the view is missing")?;
-                let reach = radius * context.xf.scale;
+                let reach = radius * view.xf.scale;
                 let on = Point2::new(centre.u + dir.u * reach, centre.v + dir.v * reach);
-                let at = context.xf.unproject(on);
+                let at = view.xf.unproject(on);
                 let body = position_body(&control.frame);
                 self.plans.push(Plan {
                     source,
-                    view,
+                    view: view.id,
+                    leg: view.leg,
                     body,
                     anchors: vec![(edge, Attach::Point { at }, on)],
                     placement,
@@ -870,8 +1001,8 @@ impl Planner<'_> {
                 let th = self.text_height;
                 if let Some(host) = first.first().and_then(|face| self.sizes.get(face)).copied() {
                     // Under the size of the same feature, starting where its text starts.
-                    let (at, right, view) =
-                        (self.plans[host].placement, self.plans[host].slide.along.u >= 0.0, self.plans[host].view);
+                    let host_plan = &self.plans[host];
+                    let (at, right) = (host_plan.placement, host_plan.slide.along.u >= 0.0);
                     let below = at.v - th / 2.0 - CLEAR - th;
                     let u = if right {
                         at.u + self.shoulder + 1.0
@@ -880,7 +1011,8 @@ impl Planner<'_> {
                     };
                     self.plans.push(Plan {
                         source: source.clone(),
-                        view,
+                        view: host_plan.view,
+                        leg: host_plan.leg,
                         body,
                         anchors: Vec::new(),
                         placement: Point2::new(round(u), round(below)),
@@ -893,11 +1025,12 @@ impl Planner<'_> {
                     let Shape::Plane { point, normal } = self.body.feature(first)? else {
                         return Err("its feature has no size on the drawing to sit under".into());
                     };
-                    let (view, edge, attach, on, out) = self.on_line(point, normal)?;
+                    let (view, edge, attach, on, out) = self.on_line(first, point, normal)?;
                     let reach = SYMBOL_OFFSET + 2.0 * th;
                     self.plans.push(Plan {
                         source: source.clone(),
-                        view,
+                        view: view.id,
+                        leg: view.leg,
                         body,
                         anchors: vec![(edge, attach, on)],
                         placement: Point2::new(round(on.u + out.u * reach + 3.0), round(on.v + out.v * reach)),
@@ -919,10 +1052,11 @@ impl Planner<'_> {
                 };
                 match self.body.feature(feature)? {
                     Shape::Plane { point, normal } => {
-                        let (view, edge, attach, on, out) = self.on_line(point, normal)?;
+                        let (view, edge, attach, on, out) = self.on_line(feature, point, normal)?;
                         self.plans.push(Plan {
                             source,
-                            view,
+                            view: view.id,
+                            leg: view.leg,
                             body,
                             anchors: vec![(edge, attach, on)],
                             placement: Point2::new(
@@ -938,14 +1072,15 @@ impl Planner<'_> {
                     Shape::Round { axis, radius, .. } => {
                         let (view, edge, _, centre, placement, dir) =
                             self.callout(&[feature.as_slice()], axis, radius)?;
-                        let scale = self.views.iter().find(|v| v.id == view).map_or(1.0, |v| v.xf.scale);
+                        let scale = view.xf.scale;
                         let on = Point2::new(centre.u + dir.u * radius * scale, centre.v + dir.v * radius * scale);
-                        let at = self.views.iter().find(|v| v.id == view).map(|v| v.xf.unproject(on));
+                        let at = view.xf.unproject(on);
                         self.plans.push(Plan {
                             source,
-                            view,
+                            view: view.id,
+                            leg: view.leg,
                             body,
-                            anchors: vec![(edge, at.map_or(Attach::Mid, |at| Attach::Point { at }), on)],
+                            anchors: vec![(edge, Attach::Point { at }, on)],
                             placement,
                             slide: Slide { along: dir, step: 3.0 },
                             host: None,
@@ -1180,6 +1315,60 @@ fn row_of<'r>(source: &PmiSource, rows: &'r [PmiRow]) -> Option<&'r PmiRow> {
     }
 }
 
+pub(crate) fn anchors_on_item(
+    annotation: &Annotation,
+    entities: &[Option<Entity>],
+    part: &Part,
+    index: &PartIndex,
+) -> bool {
+    let Some(source @ PmiSource::Item { .. }) = &annotation.source else { return true };
+    let Some(item) = row_of(source, &part.requirements.rows)
+        .filter(|row| row.feature.is_none())
+        .and_then(|row| row.on_body.as_ref())
+    else {
+        return true;
+    };
+    let ends = match &item.kind {
+        PmiKind::BasicAngle { planes } => Some(planes.each_ref().map(Vec::as_slice)),
+        PmiKind::Width { flats, .. } => Some(flats.each_ref().map(Vec::as_slice)),
+        PmiKind::Location { from, to, .. } => Some([from.feature.as_slice(), to.feature.as_slice()]),
+        _ => None,
+    };
+    if let Some([first, second]) = ends {
+        let [a, b] = entities else { return false };
+        return !(a.is_some() && a == b)
+            && a.is_none_or(|e| index.entity_on_faces(e, first))
+            && b.is_none_or(|e| index.entity_on_faces(e, second));
+    }
+    let features = item.features();
+    entities.iter().flatten().all(|entity| features.iter().any(|faces| index.entity_on_faces(*entity, faces)))
+}
+
+pub(crate) fn authored_angle(annotation: &Annotation, part: &Part) -> Option<f64> {
+    let source @ PmiSource::Item { .. } = annotation.source.as_ref()? else { return None };
+    let row = row_of(source, &part.requirements.rows)?;
+    if row.applies() && matches!(row.item.kind, PmiKind::BasicAngle { .. }) {
+        row.measured.first().copied()
+    } else {
+        None
+    }
+}
+
+pub(crate) fn repaired_linear_matches(
+    annotation: &Annotation,
+    ctx: &ViewContext,
+    part: &Part,
+    index: &PartIndex,
+) -> Result<bool, DrawingError> {
+    let Some(source @ PmiSource::Item { .. }) = &annotation.source else { return Ok(true) };
+    let Some(kind @ (PmiKind::Location { .. } | PmiKind::Width { .. })) =
+        row_of(source, &part.requirements.rows).and_then(|row| row.on_body.as_ref()).map(|item| &item.kind)
+    else {
+        return Ok(true);
+    };
+    Ok(Body::new(part, index)?.linear_matches(annotation, ctx, kind) == Some(true))
+}
+
 fn datum_target_body<F>(target: &soliddraft_kernel_api::pmi::DatumTarget<F>) -> AnnotationKind {
     let extent = match &target.kind {
         TargetKind::Point => String::new(),
@@ -1202,9 +1391,19 @@ fn position_body<F>(frame: &PositionFrame<F>) -> AnnotationKind {
     AnnotationKind::PositionFrame { upper, lower, projected_height_mm }
 }
 
+fn size_dimension_kind(size: SizeKind) -> DimensionKind {
+    match size {
+        SizeKind::Diameter => DimensionKind::Diameter,
+        SizeKind::Radius => DimensionKind::Radius,
+    }
+}
+
 /// True when an annotation of kind `body` is how the drawing shows an item of kind
 /// `kind`: a thread as a note, a plain size as a dimension, and so on.
 fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
+    if let (AnnotationKind::Dimension(dimension), PmiKind::Size { size, thread: None, .. }) = (body, kind) {
+        return dimension.kind == size_dimension_kind(*size);
+    }
     matches!(
         (body, kind),
         (
@@ -1217,8 +1416,8 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
                 | PmiKind::Knurl { .. }
                 | PmiKind::FaceNote { .. }
         ) | (
-            AnnotationKind::Dimension(_),
-            PmiKind::Size { thread: None, .. } | PmiKind::Location { .. } | PmiKind::Width { .. }
+            AnnotationKind::Dimension(Dimension { kind: DimensionKind::Linear { .. }, .. }),
+            PmiKind::Location { .. } | PmiKind::Width { .. }
         ) | (AnnotationKind::Dimension(Dimension { kind: DimensionKind::Angular, .. }), PmiKind::BasicAngle { .. })
             | (AnnotationKind::Gdt { .. }, PmiKind::Gdt { .. })
             | (AnnotationKind::PositionFrame { .. }, PmiKind::PositionControl(_))
@@ -1233,19 +1432,28 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
 /// longer has, or that no longer applies, is taken off the drawing. One whose item is now
 /// shown another way, as a size that became a thread or a thread that became a plain
 /// size, is taken off too when `redraw` says [`import`] runs next to draw the item again
-/// as it is; otherwise it stays as it was until then. Returns the names of the items
-/// taken off for good.
+/// as it is; otherwise it stays as it was until then.
 pub(crate) fn refresh(
     drawing: &mut Drawing,
     part: &Part,
+    index: &PartIndex,
     refresh_view: impl Fn(ViewId) -> bool,
-    redraw: bool,
-) -> Vec<String> {
+    contexts: Option<&crate::project::Contexts>,
+) -> Result<(), DrawingError> {
+    let redraw = contexts.is_some();
     let all = &part.requirements.rows;
     let rows: BTreeMap<&str, &PmiRow> =
         all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
+    let body = if redraw
+        && rows
+            .values()
+            .any(|row| row.applies() && matches!(row.item.kind, PmiKind::Location { .. } | PmiKind::Width { .. }))
+    {
+        Some(Body::new(part, index)?)
+    } else {
+        None
+    };
     let notes = &part.requirements.notes.notes;
-    let mut removed = Vec::new();
     let mut thread_notes = BTreeMap::new();
     if redraw {
         for annotation in drawing.sheets.iter().flat_map(|sheet| &sheet.annotations) {
@@ -1276,8 +1484,30 @@ pub(crate) fn refresh(
                 return true;
             }
             let Some(source) = annotation.source.clone() else { return true };
-            let mut redrawn = false;
-            let keep = match &source {
+            if redraw
+                && let PmiSource::Item { item } = &source
+                && rows.get(item.as_str()).is_some_and(|row| row.applies())
+            {
+                let entities: Vec<_> = annotation
+                    .anchors
+                    .iter()
+                    .map(|anchor| match index.resolve(&anchor.entity) {
+                        Resolution::Found(entity) => Some(entity),
+                        Resolution::Lost(_) => None,
+                    })
+                    .collect();
+                if entities.iter().any(Option::is_none) || !anchors_on_item(annotation, &entities, part, index) {
+                    return false;
+                }
+                if let Some(body) = &body
+                    && let Some(ctx) = contexts.and_then(|contexts| contexts.get(&annotation.view))
+                    && let Some(item) = &rows[item.as_str()].on_body
+                    && body.linear_matches(annotation, ctx, &item.kind) != Some(true)
+                {
+                    return false;
+                }
+            }
+            match &source {
                 PmiSource::Notes => {
                     if let AnnotationKind::Note { text, .. } = &mut annotation.body {
                         *text = notes_text(&heading, notes);
@@ -1303,37 +1533,26 @@ pub(crate) fn refresh(
                                         | PmiKind::FaceNote { .. }
                                 ) =>
                         {
-                            redrawn = true;
                             false
                         }
                         Some((row, placement)) if shows(&annotation.body, &row.item.kind) => {
                             if thread_notes.get(row.item.id.as_str()).is_some_and(|(kept, _)| *kept != annotation.id) {
                                 return false;
                             }
-                            update(annotation, row, &style.symbols);
-                            annotation.source = Some(source_on(row, placement));
+                            if !matches!(annotation.state, AnnotationState::Dangling { .. }) {
+                                update(annotation, row, &style.symbols);
+                                annotation.source = Some(source_on(row, placement));
+                            }
                             true
                         }
-                        Some(_) => {
-                            redrawn = true;
-                            !redraw
-                        }
+                        Some(_) => !redraw,
                         None => false,
                     }
                 }
-            };
-            if !keep
-                && !redrawn
-                && let Some(item) = source.item()
-            {
-                removed.push(item.to_owned());
             }
-            keep
         });
     }
-    removed.sort();
-    removed.dedup();
-    removed
+    Ok(())
 }
 
 /// Copies what the part states about an item into the annotation that shows it.
@@ -1419,8 +1638,6 @@ pub fn import(
     if rows.is_empty() {
         return Ok(report);
     }
-    let topology = part.geometry.topology()?;
-    let size = topology.faces.iter().fold(1.0_f64, |size, face| size.max(face.bbox.max.distance(face.bbox.min)));
     let template = drawing.sheets.get(sheet).map(|s| s.template.as_str()).unwrap_or("");
     let style = crate::library::template(template).style_file();
     // Items already on the drawing stay where they are and are not drawn twice.
@@ -1431,12 +1648,11 @@ pub fn import(
         .filter_map(|annotation| row_of(annotation.source.as_ref()?, rows))
         .map(|row| row.item.id.as_str())
         .collect();
-    let candidates: Vec<&ViewContext> = views
+    let candidates: Vec<_> = views
         .iter()
         .filter(|v| !v.pictorial)
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
-    let axes = part.geometry.face_carriers()?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
     // The way out of the group of views, for each view: away from the middle of the
     // others.
     let places: Vec<(ViewId, Point2)> =
@@ -1460,9 +1676,19 @@ pub fn import(
         })
         .collect();
     let mut planner = Planner {
-        body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), axes, index, tol: 1e-6 * size },
+        body: Body::new(part, index)?,
         bbox: candidates.iter().filter_map(|v| Some((v.id, drawing.view(v.id)?.geometry.bbox))).collect(),
-        views: candidates,
+        views: candidates
+            .iter()
+            .flat_map(|&ctx| {
+                (0..=u8::from(ctx.xf.has_aligned_legs())).map(move |leg| PmiView {
+                    ctx,
+                    id: ctx.id,
+                    xf: ctx.xf.in_leg(leg),
+                    leg,
+                })
+            })
+            .collect(),
         plans: Vec::new(),
         diagonals_taken: BTreeMap::new(),
         on_edge: BTreeMap::new(),
@@ -1518,7 +1744,9 @@ pub fn import(
             .anchors
             .iter()
             .filter_map(|(id, attach, cached)| {
-                Some(Anchor { entity: index.edge_ref(*id)?, attach: *attach, cached: *cached })
+                let mut entity = index.edge_ref(*id)?;
+                entity.section_leg = plan.leg;
+                Some(Anchor { entity, attach: *attach, cached: *cached })
             })
             .collect();
         drawing.sheets[sheet].annotations.push(Annotation {
@@ -1611,22 +1839,7 @@ fn points_of(path: &kurbo::BezPath, out: &mut Vec<(f64, f64)>) {
 }
 
 fn text_box(text: &display::TextItem) -> Rect {
-    let width = display::text_width(&text.text, text.height);
-    let (x0, x1) = match text.halign {
-        crate::library::Align::Left => (0.0, width),
-        crate::library::Align::Centre => (-width / 2.0, width / 2.0),
-        crate::library::Align::Right => (-width, 0.0),
-    };
-    let (y0, y1) = match text.valign {
-        display::VAlign::Bottom => (0.0, text.height),
-        display::VAlign::Centre => (-text.height / 2.0, text.height / 2.0),
-        display::VAlign::Top => (-text.height, 0.0),
-    };
-    let mut path = kurbo::Rect::new(x0 - CLEAR, y0 - CLEAR, x1 + CLEAR, y1 + CLEAR).to_path(0.1);
-    path.apply_affine(
-        kurbo::Affine::translate((text.pos.u, text.pos.v)) * kurbo::Affine::rotate(text.angle.to_radians()),
-    );
-    let b = path.bounding_box();
+    let b = text.bounds(CLEAR);
     Rect { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 }
 }
 
@@ -1638,7 +1851,7 @@ fn lay(drawing: &Drawing, sheet: usize) -> Laid {
         [l + band, b + band, r - band, t - band]
     });
     let mut laid = Laid { texts: BTreeMap::new(), lines: BTreeMap::new(), fixed: Vec::new(), frame };
-    for item in list.printable() {
+    for item in list.sheet_items() {
         match (item.owner(), item) {
             (Owner::Annotation(id) | Owner::AnnotationEnd(id, _), Item::Text(text)) => {
                 laid.texts.entry(id).or_default().push(text_box(text));

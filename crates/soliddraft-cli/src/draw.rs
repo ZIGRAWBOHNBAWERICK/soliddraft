@@ -12,10 +12,10 @@ use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId, Resolution, 
 use soliddraft_drawing::export::{self, Format, PdfInfo};
 use soliddraft_drawing::file::{self, FileMeta};
 use soliddraft_drawing::{
-    AccuracyCounts, AnnotationId, AnnotationKind, Boundary, BrokenOut, Command, DatumRef, Drawing, DrawingError,
-    DrawingMeta, GdtCharacteristic, HiddenLines, LinearOrientation, MaterialCondition, ModelDimension, ModelMeasure,
-    NewDrawing, Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges, Template, UndoStack, UpdateReport,
-    ViewId, annotate, derived, display, project,
+    AccuracyCounts, AlignAxis, AnnotationId, AnnotationKind, Boundary, Break, BrokenOut, Command, DatumRef, Drawing,
+    DrawingError, DrawingMeta, GdtCharacteristic, HalfSection, HiddenLines, LinearOrientation, MaterialCondition,
+    ModelDimension, ModelMeasure, NewDrawing, Part, PartIndex, RevisionRow, SetKind, SurfaceProcess, TangentEdges,
+    Template, TitleCell, UndoStack, UpdateReport, ViewId, annotate, derived, display, project,
 };
 use soliddraft_kernel_api::drawing::StandardView;
 use soliddraft_kernel_api::{BooleanOp, Kernel, Point2, Vec3};
@@ -37,7 +37,8 @@ placed on the template's sheet, and the part's feature dimensions brought in
 (Model items). Writes the drawing file and its SVG, PDF and DXF. The drawing
 references the part by id and pins the part's revision.
 
-  --template   iso-a3 (default, first angle), iso-a4, ansi-a or ansi-b (third angle)
+  --template   iso-a4, iso-a3 (default), iso-a2, iso-a1 or iso-a0 (first angle);
+               ansi-a, ansi-b, ansi-c, ansi-d or ansi-e (third angle)
   --views      front, back, top, bottom, left, right, iso; the first orthographic
                view is the base view and the others fold off it (default: front, top,
                the side view right of the front view, and iso)
@@ -56,6 +57,14 @@ it on sheet n, which is made from the same template if it does not exist yet:
   --section <view>:<x,y,z>:h|v[:flip]       a section along a horizontal or
                                              vertical cutting line through the model
                                              point; flip looks the other way
+  --offset-section <view>:<x,y,z>;<x,y,z>;...[:flip]
+                                             an offset section through an even number
+                                             of model points from four: parallel cuts
+                                             joined by jogs square to them
+  --aligned-section <view>:<x,y,z>;<x,y,z>;<x,y,z>[:flip]
+                                             an aligned section through three model
+                                             points: the second leg is revolved about
+                                             the middle point into the first leg's plane
   --detail <view>:<x,y,z>:<radius>:<factor> a detail of the circle round the model
                                              point, radius in model mm
   --aux <view>:<x,y,z>[:flip]               an auxiliary view square to the edge
@@ -67,6 +76,15 @@ letter, or a view id. View edits:
   --crop <view>:<x,y,z>:<x,y,z>             keep the rectangle between two model points
   --broken-out <view>:<x,y,z>:<radius>:<depth>
                                              cut away a circle to a depth (model mm)
+  --break <view>:<x,y,z>:<x,y,z>:h|v
+                                             leave out the stretch of the view between
+                                             two model points, horizontally or
+                                             vertically, closed up to a fixed gap of
+                                             6 sheet mm; dimensions keep model lengths
+  --half-section <view>:<x,y,z>:<x,y,z>[:flip]
+                                             cut open the side left of the symmetry line
+                                             through two model points, to the plane
+                                             through it; flip cuts the right side
   --display <view>:hidden=removed|visible   hidden lines
   --display <view>:tangent=removed|phantom|visible
                                              tangent edges
@@ -89,6 +107,11 @@ Annotations, attached to the edges nearest model points:
   --revision <rev>:<description>[:<date>[:<approved>]]
                                              a row of the revision table
   --revision-symbol <view>:<x,y,z>:<rev>    a revision symbol
+  --title-field <key>[@<n>]=<text>           a title block field's text on sheet n
+                                             (default 1)
+  --title-cell <key>=<x>,<y>,<w>,<h>[@<n>]
+                                             move a title block field's cell, in mm
+                                             from the block's bottom-left corner
 
 Add @dx,dy to --gdt, --datum, --finish and --revision-symbol to place the symbol
 that far from its anchor, in sheet millimetres.
@@ -141,10 +164,15 @@ struct Options {
 #[derive(Clone, Debug)]
 enum Step2 {
     Section { parent: String, through: Vec3, horizontal: bool, flip: bool, sheet: Option<usize> },
+    BentSection { parent: String, through: Vec<Vec3>, flip: bool, sheet: Option<usize> },
     Detail { parent: String, center: Vec3, radius: f64, factor: f64, sheet: Option<usize> },
     Aux { parent: String, near: Vec3, flip: bool, sheet: Option<usize> },
     Crop { view: String, a: Vec3, b: Vec3 },
     BrokenOut { view: String, at: Vec3, radius: f64, depth: f64 },
+    Break { view: String, from: Vec3, to: Vec3, axis: AlignAxis },
+    Half { view: String, axis: [Vec3; 2], flip: bool },
+    TitleField { sheet: usize, key: String, value: String },
+    TitleCell { sheet: usize, key: String, cell: TitleCell },
     Display { view: String, key: String, value: String },
     Set { kind: SetKind, view: String, orientation: LinearOrientation, offset: f64, points: Vec<Vec3> },
     Gdt { view: String, at: Vec3, body: AnnotationKind, offset: Option<Point2> },
@@ -243,6 +271,27 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
             let horizontal = orientation(dir)? == LinearOrientation::Horizontal;
             Ok(Step2::Section { parent: parent.into(), through: point(through)?, horizontal, flip, sheet })
         }
+        "--offset-section" | "--aligned-section" => {
+            let (v, sheet) = on_sheet(value)?;
+            let parts: Vec<&str> = v.split(':').collect();
+            let (parent, pts, flip) = match parts[..] {
+                [p, x] => (p, x, false),
+                [p, x, "flip"] => (p, x, true),
+                _ => return Err(bad("<view>:<x,y,z>;<x,y,z>;...[:flip]")),
+            };
+            let through = pts.split(';').map(point).collect::<Result<Vec<_>, _>>()?;
+            let fits = match flag {
+                "--aligned-section" => through.len() == 3,
+                _ => through.len() >= 4 && through.len().is_multiple_of(2),
+            };
+            if !fits {
+                return Err(match flag {
+                    "--aligned-section" => format!("{flag} needs three points, not {}", through.len()),
+                    _ => format!("{flag} needs an even number of points from four, not {}", through.len()),
+                });
+            }
+            Ok(Step2::BentSection { parent: parent.into(), through, flip, sheet })
+        }
         "--detail" => {
             let (v, sheet) = on_sheet(value)?;
             let [parent, c, r, f] = v.split(':').collect::<Vec<_>>()[..] else {
@@ -282,6 +331,42 @@ fn parse_step(flag: &str, value: &str) -> Result<Step2, String> {
                 radius: number(r, "a radius")?,
                 depth: number(depth, "a depth")?,
             })
+        }
+        "--break" => {
+            let [view, from, to, dir] = value.split(':').collect::<Vec<_>>()[..] else {
+                return Err(bad("<view>:<x,y,z>:<x,y,z>:h|v"));
+            };
+            let axis = match orientation(dir)? {
+                LinearOrientation::Horizontal => AlignAxis::Horizontal,
+                LinearOrientation::Vertical => AlignAxis::Vertical,
+                _ => return Err(bad("<view>:<x,y,z>:<x,y,z>:h|v")),
+            };
+            Ok(Step2::Break { view: view.into(), from: point(from)?, to: point(to)?, axis })
+        }
+        "--half-section" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let (view, a, b, flip) = match parts[..] {
+                [v, a, b] => (v, a, b, false),
+                [v, a, b, "flip"] => (v, a, b, true),
+                _ => return Err(bad("<view>:<x,y,z>:<x,y,z>[:flip]")),
+            };
+            Ok(Step2::Half { view: view.into(), axis: [point(a)?, point(b)?], flip })
+        }
+        "--title-field" => {
+            let Some((key, text)) = value.split_once('=') else { return Err(bad("<key>[@<n>]=<text>")) };
+            let (key, sheet) = on_sheet(key)?;
+            Ok(Step2::TitleField { sheet: sheet.unwrap_or(0), key: key.into(), value: text.into() })
+        }
+        "--title-cell" => {
+            let (cell, sheet) = on_sheet(value)?;
+            let Some((key, rest)) = cell.split_once('=') else { return Err(bad("<key>=<x>,<y>,<w>,<h>")) };
+            let sheet = sheet.unwrap_or(0);
+            let numbers = rest.split(',').map(|n| number(n, "a title cell")).collect::<Result<Vec<_>, _>>()?;
+            let cell = match numbers[..] {
+                [x, y, w, h] => TitleCell { cell: [x, y, w, h] },
+                _ => return Err(bad("<key>=<x>,<y>,<w>,<h>")),
+            };
+            Ok(Step2::TitleCell { sheet, key: key.into(), cell })
         }
         "--display" => {
             let Some((view, setting)) = value.split_once(':') else { return Err(bad("<view>:<key>=<value>")) };
@@ -450,9 +535,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 let end = e.parse().map_err(|_| "--reattach needs an end index")?;
                 o.reattach.push((id(a.to_owned(), "--reattach")?, end, Vec3::new(x, y, z)));
             }
-            flag @ ("--section" | "--detail" | "--aux" | "--crop" | "--broken-out" | "--display" | "--ordinate"
-            | "--baseline" | "--chain" | "--gdt" | "--datum" | "--finish" | "--revision"
-            | "--revision-symbol") => {
+            flag @ ("--section" | "--offset-section" | "--aligned-section" | "--detail" | "--aux" | "--crop"
+            | "--broken-out" | "--break" | "--half-section" | "--title-field" | "--title-cell"
+            | "--display" | "--ordinate" | "--baseline" | "--chain" | "--gdt" | "--datum" | "--finish"
+            | "--revision" | "--revision-symbol") => {
                 let v = value(flag)?;
                 o.steps.push(parse_step(flag, &v)?);
             }
@@ -479,6 +565,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("off")).init();
     let result = if o.update.is_some() { update(&o) } else { create(&o) };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -558,21 +645,24 @@ fn create(o: &Options) -> Result<(), String> {
         let made = soliddraft_drawing::make_drawing(part, &new).map_err(|e| e.to_string())?;
         let (mut drawing, import) = (made.drawing, made.import);
         apply_steps(&mut drawing, part, &o.steps)?;
-        let outputs = write_outputs(&drawing, &outs, &source.backend, &[]);
+        let outputs = write_outputs(&drawing, &outs, &source.backend);
         let name = drawing_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+        let printed = |id| drawing.view(id).is_some_and(soliddraft_drawing::View::is_printed);
+        let views = drawing.sheets.iter().flat_map(|s| &s.views).filter(|view| view.is_printed()).count();
         if o.json {
             let report = CreateReport {
                 backend: &source.backend,
                 drawing: &name,
                 template: &o.template,
                 scale: drawing.sheets[0].scale.to_string(),
-                views: drawing.sheets.iter().map(|s| s.views.len()).sum(),
+                views,
                 sheets: drawing.sheets.len(),
                 dimensions_placed: import.placed,
                 dimensions_skipped: &import.skipped,
                 annotations: drawing.sheets.iter().map(|s| s.annotations.len()).sum(),
                 location_labels: display::location_labels(&drawing)
                     .into_iter()
+                    .filter(|l| printed(l.view) && printed(l.parent))
                     .map(|l| LocationOut {
                         view: l.view.0,
                         parent: l.parent.0,
@@ -585,7 +675,6 @@ fn create(o: &Options) -> Result<(), String> {
             };
             println!("{}", serde_json::to_string(&report).expect("reports serialise"));
         } else {
-            let views: usize = drawing.sheets.iter().map(|s| s.views.len()).sum();
             let sheets =
                 if drawing.sheets.len() > 1 { format!(" on {} sheets", drawing.sheets.len()) } else { String::new() };
             println!(
@@ -728,6 +817,9 @@ fn update(o: &Options) -> Result<(), String> {
             }
             message
         };
+        // Set when a repair fails because a rebuilt view cannot serve it, not because the
+        // request names something that does not exist: the rebuild is then still saved.
+        let mut keep_rebuild = false;
         let requested = (|| -> Result<Vec<(Command, String)>, DrawingError> {
             let annotation = |id| drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id));
             let mut invalid = Vec::new();
@@ -773,19 +865,23 @@ fn update(o: &Options) -> Result<(), String> {
                     (Command::AcceptChange { annotation: c.annotation }, format!("accepted {}", c.annotation))
                 }));
             }
-            let mut operational = Vec::new();
+            // Each end attaches to an edge drawn in its own view, so a section leg or a broken
+            // view picks the edge the user sees there.
             for (id, end, at) in &o.reattach {
                 let id = AnnotationId(*id);
-                match soliddraft_drawing::edge_near(part, *at) {
-                    Ok(entity) => requested.push((
-                        Command::Reattach { annotation: id, end: *end, entity },
-                        format!("reattached end {end} of {id}"),
-                    )),
-                    Err(error) => operational.push(format!("reattach end {end} of {id}: {error}")),
-                }
-            }
-            if !operational.is_empty() {
-                return Err(DrawingError::BadRequest(operational.join("; ")));
+                let index = PartIndex::build(part)?;
+                let annotation = annotation(id)?;
+                let ctx =
+                    derived::context(&drawing, part, &index, annotation.view).inspect_err(|_| keep_rebuild = true)?;
+                let picked = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *at)
+                    .ok_or_else(|| DrawingError::BadRequest("No edge in the view is available at that point".into()))?;
+                let attach = (!ctx.xf.breaks.is_empty()
+                    && annotation.anchors.get(*end).is_some_and(|a| a.attach != soliddraft_drawing::Attach::Centre))
+                .then_some(picked.attach);
+                requested.push((
+                    Command::Reattach { annotation: id, end: *end, entity: picked.entity, attach },
+                    format!("reattached end {end} of {id}"),
+                ));
             }
             for id in &o.freeze {
                 requested.push((
@@ -800,8 +896,16 @@ fn update(o: &Options) -> Result<(), String> {
                 ));
             }
             Ok(requested)
-        })()
-        .map_err(|error| repair_error(error.to_string()))?;
+        })();
+        let requested = match requested {
+            Ok(requested) => requested,
+            Err(error) => {
+                if keep_rebuild {
+                    file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+                }
+                return Err(repair_error(error.to_string()));
+            }
+        };
         let prepared = if requested.is_empty() {
             None
         } else {
@@ -825,7 +929,7 @@ fn update(o: &Options) -> Result<(), String> {
             file::write(&saved, &drawing, &meta).map_err(|e| repair_error(e.to_string()))?;
         }
         let repairs = requested.into_iter().map(|(_, name)| name).collect::<Vec<_>>();
-        let outputs = write_outputs(&drawing, &o.outs, &source.backend, &report.dangling_views);
+        let outputs = write_outputs(&drawing, &o.outs, &source.backend);
         // The report after repairs: what still needs attention.
         let mut final_report = report.clone();
         final_report.dangling.retain(|d| drawing.annotation(d.annotation).is_some_and(|a| a.needs_attention()));
@@ -858,6 +962,9 @@ fn update(o: &Options) -> Result<(), String> {
             }
             for refusal in &report.dangling_views {
                 println!("  {}: {}", refusal.name, refusal.cause);
+            }
+            for item in &report.unplaced_pmi {
+                println!("  {}: {}", item.name, item.reason);
             }
             for r in &repairs {
                 println!("  {r}");
@@ -931,21 +1038,17 @@ impl OutputReport {
 
 /// Writes the drawing in each format `outs` names. A drawing file written here is a new
 /// document (Save as copy), with its own id. Every file is written atomically.
-fn write_outputs(
-    drawing: &Drawing,
-    outs: &[String],
-    backend: &str,
-    refused: &[soliddraft_drawing::DanglingView],
-) -> OutputReport {
+fn write_outputs(drawing: &Drawing, outs: &[String], backend: &str) -> OutputReport {
     let format_of =
         |out: &str| Path::new(out).extension().and_then(|ext| ext.to_str()).and_then(Format::from_extension);
     let refusals: Vec<_> = drawing
         .sheets
         .iter()
         .map(|sheet| {
-            refused
+            drawing
+                .refused_views
                 .iter()
-                .filter(|f| sheet.view(f.view).is_some())
+                .filter(|f| sheet.view(f.view).is_some_and(soliddraft_drawing::View::is_printed))
                 .map(|f| format!("{}: {}", f.name, f.cause))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -1090,6 +1193,15 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                     derived::new_section(drawing, part, &index, sheet, parent, line, *flip, None).map_err(err)?;
                 Command::PlaceView { sheet, view }
             }
+            Step2::BentSection { parent, through, flip, sheet } => {
+                let parent = find_view(drawing, parent)?;
+                let sheet = sheet_for(drawing, parent, *sheet);
+                ensure_sheet(&mut stack, drawing, part, sheet)?;
+                let line = derived::cutting_path(drawing, part, &index, parent, through).map_err(err)?;
+                let (view, _) = derived::new_section_along(drawing, part, &index, sheet, parent, &line, *flip, None)
+                    .map_err(err)?;
+                Command::PlaceView { sheet, view }
+            }
             Step2::Detail { parent, center, radius, factor, sheet } => {
                 let parent = find_view(drawing, parent)?;
                 let sheet = sheet_for(drawing, parent, *sheet);
@@ -1114,7 +1226,10 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                 let parent = find_view(drawing, parent)?;
                 let sheet = sheet_for(drawing, parent, *sheet);
                 ensure_sheet(&mut stack, drawing, part, sheet)?;
-                let edge = soliddraft_drawing::edge_near(part, *near).map_err(err)?;
+                let ctx = derived::context(drawing, part, &index, parent).map_err(err)?;
+                let edge = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *near)
+                    .ok_or("No edge in the view is available at that point")?
+                    .entity;
                 let (view, _) =
                     derived::new_auxiliary(drawing, part, &index, sheet, parent, edge, *flip, None).map_err(err)?;
                 Command::PlaceView { sheet, view }
@@ -1129,6 +1244,21 @@ fn apply_steps(drawing: &mut Drawing, part: &Part, steps: &[Step2]) -> Result<()
                 let ctx = derived::context(drawing, part, &index, view).map_err(err)?;
                 let boundary = Boundary::Circle { center: ctx.xf.point(*at), radius: radius * ctx.xf.scale };
                 Command::AddBrokenOut { view, broken_out: BrokenOut { boundary, depth: *depth } }
+            }
+            Step2::Break { view, from, to, axis } => {
+                let view = find_view(drawing, view)?;
+                let breaks = vec![Break { from: *from, to: *to, axis: *axis }];
+                Command::SetViewBreaks { view, breaks }
+            }
+            Step2::Half { view, axis, flip } => {
+                let view = find_view(drawing, view)?;
+                Command::SetHalfSection { view, half: Some(HalfSection { axis: *axis, flip: *flip }) }
+            }
+            Step2::TitleField { sheet, key, value } => {
+                Command::SetTitleField { sheet: *sheet, key: key.clone(), value: value.clone() }
+            }
+            Step2::TitleCell { sheet, key, cell } => {
+                Command::SetTitleLayout { sheet: *sheet, key: key.clone(), layout: Some(*cell) }
             }
             Step2::Display { view, key, value } => {
                 let view = find_view(drawing, view)?;
@@ -1376,7 +1506,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("soliddraft-partial-sheet-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let paths = ["result.pdf", "result.svg", "result.dxf"].map(|out| dir.join(out).display().to_string());
-        let report = write_outputs(&drawing, &paths, "test", &[refusal]);
+        drawing.refused_views.push(refusal);
+        let report = write_outputs(&drawing, &paths, "test");
         let json = serde_json::to_value(&report).unwrap();
         let exports = json["exports"].as_array().unwrap();
         assert_eq!(exports.len(), 2);
@@ -1394,7 +1525,7 @@ mod tests {
         }
         drawing.sheets.truncate(1);
         let pdf = &paths[0];
-        let report = write_outputs(&drawing, std::slice::from_ref(pdf), "test", &[]);
+        let report = write_outputs(&drawing, std::slice::from_ref(pdf), "test");
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["exports"][0]["path"].as_str(), Some(pdf.as_str()));
         assert_eq!(json["exports"][0]["accuracy"]["approximate"], 1);
@@ -1404,7 +1535,7 @@ mod tests {
         for invalid in ["typo.exe", "directory.svg"] {
             let paths = ["before.svg", invalid, "existing.svg"].map(|out| dir.join(out).display().to_string());
             std::fs::write(&paths[2], b"keep this file").unwrap();
-            let report = write_outputs(&drawing, &paths, "test", &[]);
+            let report = write_outputs(&drawing, &paths, "test");
             let json = serde_json::to_value(&report).unwrap();
             assert_eq!(json["exports"].as_array().unwrap().len(), 1);
             assert_eq!(json["exports"][0]["path"].as_str(), Some(paths[0].as_str()));

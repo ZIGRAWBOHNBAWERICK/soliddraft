@@ -5,7 +5,7 @@
 
 use super::part::PartContext;
 use soliddraft_drawing::file::{self, FileMeta};
-use soliddraft_drawing::library::{self, StyleFile, TemplateFile};
+use soliddraft_drawing::library::{self, StyleFile};
 use soliddraft_drawing::measure::display_text;
 use soliddraft_drawing::project::{self, CircleInfo, Projected, ViewTransform};
 use soliddraft_drawing::{
@@ -28,6 +28,7 @@ pub struct UpdateReport {
     pub changed: Vec<AnnotationId>,
     pub dangling: Vec<AnnotationId>,
     pub dangling_views: Vec<soliddraft_drawing::DanglingView>,
+    pub unplaced_pmi: Vec<soliddraft_drawing::pmi_items::Unplaced>,
     pub at: Instant,
     pub dismissed: bool,
 }
@@ -44,6 +45,7 @@ pub struct DrawingDoc {
     pub id: DocumentId,
     pub drawing: Drawing,
     pub path: Option<PathBuf>,
+    pub(super) saved_revision: Option<ContentHash>,
     pub dirty: bool,
     /// Counts every change, so autosave can tell edits apart from redraws.
     pub edits: u64,
@@ -101,6 +103,7 @@ impl DrawingDoc {
             id: DocumentId::new(),
             drawing,
             path: None,
+            saved_revision: None,
             dirty: false,
             edits: 0,
             stack: UndoStack::new(),
@@ -115,12 +118,8 @@ impl DrawingDoc {
         }
     }
 
-    pub fn template(&self) -> &'static TemplateFile {
-        library::template(self.drawing.sheets.first().map(|s| s.template.as_str()).unwrap_or("iso-a3"))
-    }
-
-    pub fn style(&self) -> &'static StyleFile {
-        self.template().style_file()
+    pub fn style(sheet: &soliddraft_drawing::Sheet) -> &'static StyleFile {
+        library::template(sheet.template.as_str()).style_file()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -199,6 +198,8 @@ impl DrawingDoc {
     pub(super) fn view_update_reason(&self, view: &View) -> Option<&str> {
         if let Some(failure) = self.active_refusals().find(|f| f.view == view.id) {
             Some(&failure.cause)
+        } else if !view.is_printed() {
+            None
         } else if view.needs_inclusion_for_redraw() {
             Some(soliddraft_drawing::export::INCLUDE_FOR_REDRAW)
         } else if !view.has_saved_catallax_linework() {
@@ -230,7 +231,7 @@ impl DrawingDoc {
     }
 
     fn active_refusals(&self) -> impl Iterator<Item = &soliddraft_drawing::DanglingView> {
-        self.drawing.refused_views.iter()
+        self.drawing.refused_views.iter().filter(|failure| self.drawing.view(failure.view).is_some())
     }
 
     pub fn refused_views(&self) -> impl Iterator<Item = (usize, ViewId, String, &str)> {
@@ -257,11 +258,42 @@ impl DrawingDoc {
             .count()
     }
 
+    pub(super) fn check_part(&self, doc: &crate::document::Document) -> Result<(), String> {
+        let model = &self.drawing.model;
+        let same = model.id.map_or_else(
+            || {
+                let stored =
+                    self.path.as_deref().map_or_else(|| PathBuf::from(&model.path), |path| model.stored_path(path));
+                let relative = |path: &Path| soliddraft_document::reference::relative_path(Path::new("."), path);
+                !model.path.is_empty() && doc.path.as_deref().is_some_and(|path| relative(path) == relative(&stored))
+            },
+            |id| id == doc.model().id(),
+        );
+        if !same {
+            return Err("The open part is not the one this drawing shows".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_view_part(&self, doc: &crate::document::Document, view: ViewId) -> Result<(), String> {
+        self.check_part(doc)?;
+        let view = self.drawing.view(view).ok_or("The view is no longer on the drawing")?;
+        if view.geometry.source_digest != super::part::digest(doc).as_str() {
+            return Err("Rebuild the view from the open part first".into());
+        }
+        Ok(())
+    }
+
     /// Applies a command, with the part when the command reads it.
     pub fn apply(&mut self, cmd: Command, part: Option<&PartContext<'_>>) -> Result<(), String> {
         let part_key = part.and_then(|p| p.doc.model().journal_key());
         let journal = self.journal_command(|| serde_json::json!({"op":"execute", "command":cmd, "part":part_key}));
         journal.finish((|| {
+            if cmd.uses_part(&self.drawing)
+                && let Some(part) = part
+            {
+                self.check_part(part.doc)?;
+            }
             if let Command::SetViewExcluded { view, excluded: true } = &cmd
                 && let Some((_, _, name, cause)) = self.refused_views().find(|(_, id, _, _)| id == view)
             {
@@ -275,6 +307,8 @@ impl DrawingDoc {
                 | Command::SetViewCrop { view, .. }
                 | Command::AddBrokenOut { view, .. }
                 | Command::RemoveBrokenOut { view, .. }
+                | Command::SetViewBreaks { view, .. }
+                | Command::SetHalfSection { view, .. }
                 | Command::ReattachView { view, .. } => Some(*view),
                 Command::SetViewDisplay { view, display } => {
                     let before = self.drawing.view(*view).map(|v| v.display);
@@ -327,10 +361,15 @@ impl DrawingDoc {
                     from_revision: from,
                     to_revision: ctx.digest.clone(),
                     change,
-                    views: r.projections.len(),
+                    views: r
+                        .projections
+                        .iter()
+                        .filter(|(id, _)| self.drawing.view(*id).is_some_and(View::is_printed))
+                        .count(),
                     changed,
                     dangling,
                     dangling_views: r.dangling_views,
+                    unplaced_pmi: r.unplaced_pmi,
                     at: Instant::now(),
                     dismissed: false,
                 });
@@ -353,8 +392,7 @@ impl DrawingDoc {
             if (ratio - 1.0).abs() < 1e-12 {
                 continue;
             }
-            xf.centre = Point2::new(xf.centre.u * ratio, xf.centre.v * ratio);
-            xf.scale = scale;
+            *xf = xf.rescaled(scale);
             if let Some(circles) = self.circles.get_mut(id) {
                 for c in circles {
                     c.centre = xf.point(c.model_centre);
@@ -389,6 +427,7 @@ impl DrawingDoc {
         display: ViewDisplay,
         scale: ViewScale,
     ) -> Result<(View, Projected), String> {
+        self.check_part(ctx.doc)?;
         let s = self.drawing.sheets.get(sheet).ok_or("no such sheet")?;
         let mut view = View {
             id: self.drawing.next_view_id(),
@@ -403,6 +442,8 @@ impl DrawingDoc {
             crop: None,
             broken_out: Vec::new(),
             exploded: false,
+            breaks: Vec::new(),
+            half: None,
         };
         let mut with_view = s.clone();
         with_view.views.push(view.clone());
@@ -423,8 +464,8 @@ impl DrawingDoc {
     }
 
     /// A dimension's display text in the drawing's style.
-    pub fn dimension_text(&self, d: &Dimension) -> String {
-        display_text(d, &self.style().symbols)
+    pub fn dimension_text(sheet: &soliddraft_drawing::Sheet, d: &Dimension) -> String {
+        display_text(d, &Self::style(sheet).symbols)
     }
 
     /// Marks a change: unsaved, and one more edit for autosave.
@@ -444,8 +485,11 @@ impl DrawingDoc {
     /// where. The id is kept: saving under another name is a rename, not a copy.
     /// Returns a warning when the backup could not be made.
     pub fn save(&mut self, path: &Path, kernel: &str) -> Result<Option<String>, String> {
-        let warning = crate::file::write_document(path, &self.to_bytes(kernel, true)?)?;
+        let bytes = self.to_bytes(kernel, true)?;
+        let identity = soliddraft_document::identify(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
+        let warning = crate::file::write_document(path, &bytes)?;
         self.path = Some(path.to_path_buf());
+        self.saved_revision = Some(identity.revision);
         self.dirty = false;
         Ok(warning)
     }
@@ -459,8 +503,15 @@ impl DrawingDoc {
         let Some(path) = self.path.as_deref() else { return };
         let current_model = &self.drawing.model;
         self.stack.map_model_paths(|model| {
-            if model.id == previous_model.id && model.kind == previous_model.kind && model.path == previous_model.path {
+            if model.id == previous_model.id
+                && model.kind == previous_model.kind
+                && model.pinned == previous_model.pinned
+                && model.path == previous_model.path
+            {
                 return current_model.path.clone();
+            }
+            if model.path.is_empty() {
+                return String::new();
             }
             let target = previous_path.map_or_else(|| PathBuf::from(&model.path), |old| model.stored_path(old));
             let mut model = model.clone();
@@ -474,15 +525,15 @@ impl DrawingDoc {
         let (drawing, meta) = file::from_bytes(bytes).map_err(|e| e.to_string())?;
         let mut doc = DrawingDoc::new(drawing);
         doc.id = meta.id;
+        doc.saved_revision = soliddraft_document::identify(std::io::Cursor::new(bytes)).ok().map(|id| id.revision);
         Ok(doc)
     }
 
     /// Opens a drawing file. It shows the part revision it is pinned at; whether the
     /// part has moved on is the resolver's answer (see `super::resolve_model`).
     pub fn open(path: &Path) -> Result<DrawingDoc, String> {
-        let (drawing, meta) = file::read(path).map_err(|e| e.to_string())?;
-        let mut doc = DrawingDoc::new(drawing);
-        doc.id = meta.id;
+        let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let mut doc = Self::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         doc.path = Some(path.to_path_buf());
         Ok(doc)
     }
@@ -493,6 +544,32 @@ mod tests {
     use super::*;
     use soliddraft_drawing::fixture::bracket_a3;
     use soliddraft_drawing::{AnnotationKind, Scale};
+
+    #[test]
+    fn a_display_section_warns_only_if_its_rebuild_failed() {
+        let mut drawing = soliddraft_drawing::fixture::bracket_a3();
+        let view = &mut drawing.sheets[0].views[0];
+        let id = view.id;
+        view.label = Some("Section B".into());
+        view.geometry.display_only = true;
+        view.geometry.source_digest = "older revision".into();
+        let mut doc = DrawingDoc::new(drawing);
+        let view = doc.drawing.view(id).unwrap();
+        assert!(doc.view_is_up_to_date(view));
+        assert_eq!(doc.view_update_reason(view), None);
+        assert!(!doc.stale_views().contains(&id));
+        assert!(doc.view_refusal_messages().next().is_none());
+
+        doc.drawing.refused_views.push(soliddraft_drawing::DanglingView {
+            view: id,
+            name: "Section B".into(),
+            cause: "The break exceeds the part".into(),
+        });
+        let view = doc.drawing.view(id).unwrap();
+        assert_eq!(doc.view_update_reason(view), Some("The break exceeds the part"));
+        assert!(doc.stale_views().contains(&id));
+        assert_eq!(doc.view_refusal_messages().next().as_deref(), Some("Section B: The break exceeds the part"));
+    }
 
     #[test]
     fn aligned_views_slide_along_their_guide_and_follow_their_parent() {

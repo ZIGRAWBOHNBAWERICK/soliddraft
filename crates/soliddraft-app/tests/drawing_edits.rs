@@ -29,7 +29,7 @@ fn drawing(doc: &Document) -> DrawingDoc {
         views: soliddraft_drawing::default_views(&template),
         template,
         model: soliddraft_drawing::DocRef::new(
-            soliddraft_drawing::DocumentId::new(),
+            ctx.id,
             soliddraft_drawing::DocKind::Part,
             "part.dwprt",
             ctx.digest.clone(),
@@ -47,6 +47,36 @@ fn drawing(doc: &Document) -> DrawingDoc {
         drawing.remember(*id, p);
     }
     drawing
+}
+
+#[test]
+fn a_prepared_view_projects_and_replays_only_with_the_linked_part() {
+    let doc = part(ProfileKind::Rectangle { width: 40.0, height: 30.0 });
+    let other = part(ProfileKind::Rectangle { width: 80.0, height: 30.0 });
+    let ctx = PartContext::new(&doc).unwrap();
+    let other_ctx = PartContext::new(&other).unwrap();
+    let mut d = drawing(&doc);
+    let kind = d.drawing.sheets[0].views[0].kind.clone();
+    let preview = |part: &PartContext<'_>| {
+        d.project_new(part, 0, &kind, soliddraft_drawing::ViewDisplay::ORTHOGRAPHIC, ViewScale::Sheet)
+    };
+    let error = preview(&other_ctx).unwrap_err();
+    assert_eq!(error, "The open part is not the one this drawing shows");
+    let (view, _) = preview(&ctx).unwrap();
+    let id = view.id;
+    let replay = |view: soliddraft_drawing::View| serde_json::json!({"op":"execute", "command":Command::PlaceView { sheet: 0, view }});
+    let input = replay(view.clone());
+    let error = d.run_journal_command(input.clone(), Some(&other_ctx)).unwrap_err();
+    assert_eq!(error, "The open part is not the one this drawing shows");
+    let mut from_other = drawing(&other).drawing.sheets[0].views[0].clone();
+    from_other.id = id;
+    let input_from_other = replay(from_other);
+    assert!(d.run_journal_command(input_from_other.clone(), Some(&ctx)).is_err());
+    assert!(d.run_journal_command(input_from_other, None).is_err());
+    assert!(d.drawing.view(id).is_none());
+    assert!(d.undo().is_none());
+    d.run_journal_command(input, Some(&ctx)).unwrap();
+    assert_eq!(d.drawing.view(id), Some(&view));
 }
 
 #[test]
@@ -125,7 +155,7 @@ fn circle_picks_follow_sheet_view_and_inherited_scales_through_history() {
                 .iter()
                 .position(|c| c.source.kernel_hint == circles[0].entity.kernel_hint)
                 .unwrap();
-            let pick = Pick { view: top, curve, end: None };
+            let pick = Pick { view: top, curve, end: None, at: None };
             let proposal = propose(view, &[pick], circles).unwrap();
             assert_eq!(proposal.kind, DimensionKind::Diameter);
             assert!(
@@ -170,7 +200,7 @@ fn same_scale_model_update_restores_picking_metadata_with_drawing_history() {
     let after = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
     let diameter = |d: &DrawingDoc| {
         let view = d.drawing.view(top).unwrap();
-        let pick = Pick { view: top, curve, end: None };
+        let pick = Pick { view: top, curve, end: None, at: None };
         let proposal = propose(view, &[pick], &d.circles[&top]).unwrap();
         assert_eq!(proposal.kind, DimensionKind::Diameter, "circle picking lost its exact metadata");
         proposal.radius * 2.0 / project::view_scale(&d.drawing, top).unwrap()
@@ -209,7 +239,7 @@ fn transferring_a_sheet_scale_circle_keeps_geometry_picking_and_history_together
         for circle in &d.circles[&top] {
             let curve =
                 view.geometry.curves.iter().position(|c| c.source.kernel_hint == circle.entity.kernel_hint).unwrap();
-            let proposal = propose(view, &[Pick { view: top, curve, end: None }], &d.circles[&top]).unwrap();
+            let proposal = propose(view, &[Pick { view: top, curve, end: None, at: None }], &d.circles[&top]).unwrap();
             assert_eq!(proposal.kind, DimensionKind::Diameter);
             assert!((proposal.radius * 2.0 / scale - 10.0).abs() < 1e-6);
             assert_eq!(circle.centre, d.transforms[&top].point(circle.model_centre));
@@ -287,7 +317,7 @@ fn round_dimension_repairs_accept_circles_and_remeasure_the_value() {
         d.apply(Command::AddDimension { annotation: a }, None).unwrap();
         soliddraft_drawing::apply_with(
             &mut d.drawing,
-            &Command::Reattach { annotation: id, end: 0, entity: circle.entity },
+            &Command::Reattach { annotation: id, end: 0, entity: circle.entity, attach: None },
             &part,
         )
         .unwrap();

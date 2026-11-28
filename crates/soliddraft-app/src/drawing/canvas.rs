@@ -15,9 +15,9 @@ use soliddraft_drawing::library::{Align, Weight};
 use soliddraft_drawing::measure::{self as resolve, CurveShape, Pick, shape_of};
 use soliddraft_drawing::project::{self, view_bounds};
 use soliddraft_drawing::{
-    AlignAxis, Alignment, Annotation, AnnotationId, AnnotationKind, AnnotationState, Attach, Command, Dimension,
-    DimensionKind, FoldDirection, LinearOrientation, Orientation, StyleOverrides, Tolerance, ViewDisplay, ViewId,
-    ViewKind, ViewScale,
+    AlignAxis, Alignment, Annotation, AnnotationId, AnnotationKind, AnnotationState, Attach, Command, CurveKind,
+    Dimension, DimensionKind, FoldDirection, Orientation, StyleOverrides, Tolerance, ViewDisplay, ViewId, ViewKind,
+    ViewScale,
 };
 use soliddraft_kernel_api::Point2;
 
@@ -176,7 +176,13 @@ pub(super) struct Hit {
 /// Annotations win over curves, visible curves over hidden ones, and of two curves at
 /// the same distance the shorter one, so a hole's edge wins over the long edge it
 /// lies on.
-fn hit_test(sheet: &Sheet2<'_>, list: &DisplayList, pos: Pos2, curves_only: bool) -> Option<Hit> {
+fn hit_test(
+    sheet: &Sheet2<'_>,
+    model: &soliddraft_drawing::Sheet,
+    list: &DisplayList,
+    pos: Pos2,
+    curves_only: bool,
+) -> Option<Hit> {
     let mut best: Option<Hit> = None;
     let mut consider = |owner: Owner, distance: f32, end: Option<Attach>, penalty: f32, length: f32| {
         let priority = match owner {
@@ -201,13 +207,26 @@ fn hit_test(sheet: &Sheet2<'_>, list: &DisplayList, pos: Pos2, curves_only: bool
                 let polys = sheet.polylines(&p.path);
                 let length: f32 =
                     polys.iter().map(|poly| poly.windows(2).map(|w| (w[1] - w[0]).length()).sum::<f32>()).sum();
+                let model_ends = match p.owner {
+                    Owner::Curve(id, index) => model.view(id).and_then(|v| {
+                        let ends = v.geometry.curves.get(index)?.ends?;
+                        Some(ends.map(|end| sheet.s(Point2::new(end.u + v.position.u, end.v + v.position.v))))
+                    }),
+                    _ => None,
+                };
                 for poly in &polys {
                     for w in poly.windows(2) {
                         let d = seg_distance(pos, w[0], w[1]);
                         if d <= HIT_PX {
-                            let end = if let Owner::Curve(..) = p.owner {
+                            let end = if matches!(p.owner, Owner::Curve(..)) {
                                 let (a, b) = (poly[0], poly[poly.len() - 1]);
-                                if (pos - a).length() <= HIT_PX + 1.0 {
+                                if let Some(ends) = model_ends {
+                                    ends.into_iter().zip([Attach::Start, Attach::End]).find_map(|(end, attach)| {
+                                        (((a - end).length() < 0.05 || (b - end).length() < 0.05)
+                                            && (pos - end).length() <= HIT_PX + 1.0)
+                                            .then_some(attach)
+                                    })
+                                } else if (pos - a).length() <= HIT_PX + 1.0 {
                                     Some(Attach::Start)
                                 } else if (pos - b).length() <= HIT_PX + 1.0 {
                                     Some(Attach::End)
@@ -315,7 +334,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let canvas = Rect::from_min_max(whole.min, pos2(whole.right(), strip.top()));
     let (rect, resp) = ui.allocate_exact_size(canvas.size(), Sense::click_and_drag());
     s.canvas_rect = rect;
-    let paper = (s.doc.template().paper.width, s.doc.template().paper.height);
+    // Each sheet has its own format.
+    let format = soliddraft_drawing::library::template(s.sheet().template.as_str());
+    let paper = (format.paper.width, format.paper.height);
     if s.needs_fit {
         s.camera.fit(rect, paper);
         s.needs_fit = false;
@@ -352,7 +373,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     // The display list for this frame.
     let stale = s.doc.stale_views();
-    let format = s.doc.template();
     let style = format.style_file();
     let lctx =
         layout::Context { format, style, stale: &stale, sheet_index: s.sheet, sheet_count: s.doc.drawing.sheets.len() };
@@ -385,7 +405,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     // Hover: the tools that pick model entities see curves only.
     let curves_only = s.tool != DrawingTool::Select && !s.tool.is_derived();
-    let hit = hover_pos.filter(|_| !panning).and_then(|p| hit_test(&sheet2, &list, p, curves_only));
+    let hit = hover_pos.filter(|_| !panning).and_then(|p| hit_test(&sheet2, s.sheet(), &list, p, curves_only));
     s.hover = hit.map(|h| h.owner);
     s.hover_label = hit.and_then(|h| hover_label(s, h.owner));
 
@@ -420,6 +440,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         sheet2.paint(item, colour, extra);
     }
 
+    // The review comment's place: a ring around the annotation it is on.
+    if s.review_ready().is_ok()
+        && let Some(place) = s.review.as_ref().and_then(|r| r.place())
+        && place.sheet == s.sheet
+    {
+        let at = sheet2.s(place.at);
+        let stroke = Stroke::new(2.0, theme::accent());
+        painter.circle_stroke(at, 14.0, stroke);
+        painter.text(
+            at + vec2(16.0, -16.0),
+            Align2::LEFT_BOTTOM,
+            "Review",
+            theme::font_semibold(11.0),
+            theme::accent(),
+        );
+    }
+
     // Selected view: a dashed boundary; while a projected view is being placed, the
     // eight direction dots around its parent.
     if let Some(DrawingSel::View(id)) = s.selection
@@ -445,6 +482,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         DrawingTool::PlaceView(_)
             | DrawingTool::Section { .. }
             | DrawingTool::Detail
+            | DrawingTool::Break
+            | DrawingTool::HalfSection
             | DrawingTool::Auxiliary
             | DrawingTool::HoleCallout
     );
@@ -463,11 +502,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             place_tool(s, doc, &sheet2, &lctx, kind, pointer, ctrl, clicked, &mut push);
         }
         DrawingTool::SmartDimension => {
-            smart_dimension_tool(s, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+            smart_dimension_tool(s, doc, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
         DrawingTool::Note => {
             if clicked && let Some(p) = pointer {
-                note_tool(s, hit, p, &mut push);
+                note_tool(s, doc, hit, p, &mut push);
             }
         }
         DrawingTool::HoleCallout | DrawingTool::CentreMark => {
@@ -482,8 +521,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
         DrawingTool::Reattach { annotation, end } => {
             if clicked {
-                if let Some(Hit { owner: Owner::Curve(view, index), end: picked_end, .. }) = hit {
-                    reattach_tool(s, annotation, end, view, index, picked_end, &mut push);
+                if let Some(hit @ Hit { owner: Owner::Curve(..), .. }) = hit
+                    && let Some(p) = pointer
+                {
+                    reattach_tool(s, doc, annotation, end, hit, p, &mut push);
                 } else {
                     s.say("Reattach: click an edge or circle of the view");
                 }
@@ -501,18 +542,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         | DrawingTool::Detail
         | DrawingTool::Auxiliary
         | DrawingTool::Crop
-        | DrawingTool::BrokenOut => {
+        | DrawingTool::BrokenOut
+        | DrawingTool::Break
+        | DrawingTool::HalfSection => {
             tools::derived_tool(s, doc, &sheet2, &lctx, hit, pointer, ctrl, clicked, resp.double_clicked(), &mut push);
         }
         DrawingTool::DimensionSet(kind) => {
-            tools::set_tool(s, kind, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+            tools::set_tool(s, doc, kind, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
         DrawingTool::Gdt
         | DrawingTool::Datum
         | DrawingTool::SurfaceFinish
         | DrawingTool::RevisionSymbol
         | DrawingTool::Weld => {
-            tools::symbol_tool(s, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+            tools::symbol_tool(s, doc, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
     }
 
@@ -662,7 +705,8 @@ fn hover_label(s: &DrawingSession, owner: Owner) -> Option<String> {
         }),
         Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => {
             let a = s.doc.drawing.annotation(id)?;
-            Some(layout::annotation_name(a, s.doc.style()))
+            let owner = s.doc.drawing.sheet_of_annotation(id)?;
+            Some(layout::annotation_name(a, super::document::DrawingDoc::style(owner)))
         }
         Owner::Table(i) => match sheet.tables.get(i)?.kind {
             soliddraft_drawing::TableKind::Revision => Some("Revision table".into()),
@@ -706,7 +750,7 @@ fn select_tool(
                 DrawingSel::View(v) => s.doc.drawing.view(v).map(|v| v.position),
                 DrawingSel::Annotation(a) => s.doc.drawing.annotation(a).map(|a| a.placement),
                 DrawingSel::HoleTable(i) => s.sheet().tables.get(i).map(|t| t.position),
-                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => None,
+                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model | DrawingSel::Review => None,
             };
             if let Some(origin) = origin {
                 s.drag = Some(Drag { target: t, origin, start_pointer: p, moved: false });
@@ -739,7 +783,7 @@ fn select_tool(
                         table.position = to;
                     }
                 }
-                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => {}
+                DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model | DrawingSel::Review => {}
             }
             if let Some(d) = s.drag.as_mut() {
                 d.moved = true;
@@ -771,7 +815,7 @@ fn select_tool(
                     push(DrawingAction::Command(Command::MoveTable { sheet: s.sheet, table: i, to }));
                 }
             }
-            DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model => {}
+            DrawingSel::Format | DrawingSel::Revisions | DrawingSel::Model | DrawingSel::Review => {}
         }
         return;
     }
@@ -884,6 +928,12 @@ fn place_tool(
     push: &mut impl FnMut(DrawingAction),
 ) {
     let Some(p) = pointer else { return };
+    if let Err(error) = s.doc.check_part(doc) {
+        if clicked {
+            s.say(error);
+        }
+        return;
+    }
     let sheet_i = s.sheet;
     if s.doc.drawing.sheets.get(sheet_i).is_none() {
         s.pending = None;
@@ -1045,6 +1095,11 @@ fn place_tool(
     }
     if clicked {
         let view = pending.view.clone();
+        if let Err(error) = super::tools::pending_view_source(s, doc, &view) {
+            s.say(error);
+            s.set_tool(DrawingTool::Select);
+            return;
+        }
         let id = view.id;
         s.doc.remember(id, &pending.projected);
         push(DrawingAction::Command(Command::PlaceView { sheet: sheet_i, view: view.clone() }));
@@ -1085,6 +1140,7 @@ fn hover_card(painter: &egui::Painter, at: Pos2, line1: &str, line2: &str) {
 #[allow(clippy::too_many_arguments)]
 fn smart_dimension_tool(
     s: &mut DrawingSession,
+    doc: &crate::document::Document,
     sheet2: &Sheet2<'_>,
     lctx: &layout::Context<'_>,
     hit: Option<Hit>,
@@ -1114,7 +1170,7 @@ fn smart_dimension_tool(
                 && let Some(c) = v.geometry.curves.get(p.curve)
             {
                 let shape = shape_of(&c.path);
-                let q = if end == Attach::Start { shape.start() } else { shape.end() };
+                let q = resolve::endpoint(c, shape, end);
                 let at = sheet2.s(Point2::new(q.u + v.position.u, q.v + v.position.v));
                 sheet2.painter.circle_filled(at, 4.0, theme::accent());
             }
@@ -1159,16 +1215,35 @@ fn smart_dimension_tool(
                 s.say("Both picks must be in the same view");
                 return;
             }
-            let pick = Pick { view, curve: index, end };
-            if s.picks.contains(&pick) {
+            let pick = Pick { view, curve: index, end, at: Some(to_view(s, view, p)) };
+            if s.picks.iter().any(|p| p.curve == index && p.end == end) {
                 return;
             }
-            s.picks.push(pick);
-            let view_ref = s.sheet().view(view).cloned();
-            s.proposal = view_ref.and_then(|v| {
-                let circles = s.doc.circles.get(&v.id).map(Vec::as_slice).unwrap_or_default();
-                resolve::propose(&v, &s.picks, circles)
-            });
+            let current = tools::cache_picking(s, doc, view);
+            let Some(v) = s.sheet().view(view) else { return };
+            let mut picks = s.picks.clone();
+            picks.push(pick);
+            let circles = s.doc.circles.get(&view).map(Vec::as_slice).unwrap_or_default();
+            let model = !v.geometry.breaks.is_empty()
+                || picks.iter().any(|p| v.geometry.curves.get(p.curve).is_some_and(|c| c.source.section_leg != 0));
+            let proposal = if model && !current {
+                None
+            } else if model {
+                tools::with_part(doc, |_, index| {
+                    let xf = s.doc.transforms.get(&view).ok_or(soliddraft_drawing::DrawingError::BadView(view))?;
+                    Ok(resolve::propose_model(v, &picks, index, xf))
+                })
+                .ok()
+                .flatten()
+            } else {
+                resolve::propose(v, &picks, circles)
+            };
+            let Some(proposal) = proposal else {
+                s.say("Pick edges with measurable model geometry");
+                return;
+            };
+            s.picks = picks;
+            s.proposal = Some(proposal);
             if let Some(pr) = &s.proposal {
                 let what = match pr.kind {
                     DimensionKind::Diameter => "diameter",
@@ -1195,18 +1270,12 @@ fn smart_dimension_tool(
 
 /// The dimension a proposal makes once placed at a sheet point.
 fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet: Point2) -> Annotation {
-    let sheet = s.sheet();
-    let view = sheet.view(prop.view);
-    let scale = view.map(|v| project::effective_scale(sheet, v)).unwrap_or(1.0);
+    let scale = project::view_scale(&s.doc.drawing, prop.view).unwrap_or(1.0);
     let placement = to_view(s, prop.view, placement_sheet);
     let (kind, value, precision) = match prop.kind {
         DimensionKind::Linear { .. } if prop.points.len() >= 2 => {
             let orientation = resolve::orientation_for(&prop.points, placement);
-            (
-                DimensionKind::Linear { orientation },
-                resolve::linear_value(orientation, prop.points[0], prop.points[1], scale),
-                0,
-            )
+            (DimensionKind::Linear { orientation }, prop.distance(orientation, scale), 0)
         }
         DimensionKind::Diameter => (DimensionKind::Diameter, prop.radius * 2.0 / scale, 0),
         DimensionKind::Radius => (DimensionKind::Radius, prop.radius / scale, 0),
@@ -1216,13 +1285,7 @@ fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet
     let precision = if (value - value.round()).abs() > 1e-6 { 2 } else { precision };
     let mut anchors = prop.anchors.clone();
     // Linear dimensions between two rounds attach at the centres; the picks decided.
-    if let DimensionKind::Linear { orientation } = kind {
-        let axis = match orientation {
-            LinearOrientation::Horizontal => (1.0, 0.0),
-            LinearOrientation::Vertical => (0.0, 1.0),
-            LinearOrientation::Aligned => (0.0, 0.0),
-        };
-        let _ = axis;
+    if matches!(kind, DimensionKind::Linear { .. }) {
         for a in &mut anchors {
             if a.attach == Attach::Silhouette {
                 a.attach = Attach::Mid;
@@ -1241,9 +1304,30 @@ fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet
     }
 }
 
-fn note_tool(s: &mut DrawingSession, hit: Option<Hit>, p: Point2, push: &mut impl FnMut(DrawingAction)) {
+fn note_tool(
+    s: &mut DrawingSession,
+    doc: &crate::document::Document,
+    hit: Option<Hit>,
+    p: Point2,
+    push: &mut impl FnMut(DrawingAction),
+) {
     let id = s.doc.next_annotation_id();
     let (view, anchors, placement, leader) = match hit {
+        Some(hit @ Hit { owner: Owner::Curve(view, ..), .. })
+            if s.sheet().view(view).is_some_and(|v| !v.geometry.breaks.is_empty()) =>
+        {
+            let Some((view, anchor)) = tools::anchor_from_hit(s, doc, hit, p) else {
+                s.say("Pick edges with measurable model geometry");
+                return;
+            };
+            let at = anchor.cached;
+            (
+                view,
+                vec![anchor],
+                Point2::new(at.u + 14.0, at.v + 10.0),
+                vec![Point2::new(at.u + 10.0, at.v + 10.0 - 1.75)],
+            )
+        }
         Some(Hit { owner: Owner::Curve(view, index), .. }) => {
             let v = s.sheet().view(view).cloned();
             match v.and_then(|v| v.geometry.curves.get(index).cloned().map(|c| (v, c))) {
@@ -1295,16 +1379,17 @@ fn circle_tool(
     p: Point2,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    if s.tool == DrawingTool::HoleCallout
+        && let Err(error) = s.doc.check_view_part(doc, view)
+    {
+        s.say(error);
+        return;
+    }
+    tools::cache_picking(s, doc, view);
     let Some(v) = s.sheet().view(view).cloned() else { return };
     let Some(c) = v.geometry.curves.get(index) else { return };
-    let circle = s
-        .doc
-        .circles
-        .get(&view)
-        .and_then(|cs| {
-            cs.iter().find(|k| k.entity.kernel_hint.is_some() && k.entity.kernel_hint == c.source.kernel_hint)
-        })
-        .cloned();
+    let circle =
+        s.doc.circles.get(&view).and_then(|cs| cs.iter().find(|k| k.entity.same_projected_entity(&c.source))).cloned();
     let Some(circle) = circle else {
         s.say("That is not a circle seen face-on");
         return;
@@ -1355,13 +1440,14 @@ fn circle_tool(
 
 fn reattach_tool(
     s: &mut DrawingSession,
+    doc: &crate::document::Document,
     annotation: AnnotationId,
     end: usize,
-    view: ViewId,
-    index: usize,
-    picked_end: Option<Attach>,
+    hit: Hit,
+    pointer: Point2,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    let Hit { owner: Owner::Curve(view, index), end: picked_end, .. } = hit else { return };
     let Some(a) = s.doc.drawing.annotation(annotation) else {
         s.set_tool(DrawingTool::Select);
         return;
@@ -1370,34 +1456,29 @@ fn reattach_tool(
         s.say("Pick in the view the dimension belongs to");
         return;
     }
-    let Some(c) = s.sheet().view(view).and_then(|v| v.geometry.curves.get(index)).cloned() else { return };
-    let mut entity = c.source.clone();
-    entity.kernel_hint = c.source.kernel_hint;
-    // Which end of the picked edge: an end pick keeps it, otherwise the anchor's own kind.
-    let next_lost: Vec<usize> = match &a.state {
-        AnnotationState::Dangling { lost, .. } => lost.iter().copied().filter(|i| *i != end).collect(),
-        _ => Vec::new(),
-    };
-    if let Some(e) = picked_end
-        && let Some(an) =
-            s.doc.drawing.sheets.iter_mut().flat_map(|sh| sh.annotations.iter_mut()).find(|x| x.id == annotation)
-        && let Some(anchor) = an.anchors.get_mut(end)
+    let Some(v) = s.sheet().view(view) else { return };
+    let Some(curve) = v.geometry.curves.get(index) else { return };
+    let attach = if picked_end.is_none()
+        && !v.geometry.breaks.is_empty()
+        && curve.kind == CurveKind::Edge
+        && a.anchors.get(end).is_some_and(|anchor| anchor.attach != Attach::Centre)
     {
-        anchor.attach = e;
-    }
-    push(DrawingAction::Command(Command::Reattach { annotation, end, entity }));
-    match next_lost.first() {
-        Some(next) => {
-            let tool = DrawingTool::Reattach { annotation, end: *next };
-            s.say(format!("Reattached end {} · now pick for end {}", end + 1, next + 1));
-            push(DrawingAction::SetTool(tool));
-        }
-        None => {
-            s.say("Reattached; the dimension is measured again");
-            push(DrawingAction::SetTool(DrawingTool::Select));
-            push(DrawingAction::Select(Some(DrawingSel::Annotation(annotation))));
-        }
-    }
+        let Some(xf) = v.geometry.transform.as_ref().or_else(|| s.doc.transforms.get(&view)) else { return };
+        let at = to_view(s, view, pointer);
+        let Ok(Some(anchor)) = tools::with_part(doc, |part, index| {
+            if !s.model_is(doc.model().id()) || part.digest.as_str() != v.geometry.source_digest {
+                return Ok(None);
+            }
+            Ok(soliddraft_drawing::measure::retained_leader(curve, xf, Some(index), at))
+        }) else {
+            s.say("Rebuild the drawing with its part before picking an edge");
+            return;
+        };
+        Some(anchor.attach)
+    } else {
+        picked_end
+    };
+    push(DrawingAction::Command(Command::Reattach { annotation, end, entity: curve.source.clone(), attach }));
 }
 
 /// The banner over the canvas after an update: what changed in the part and what it
@@ -1500,10 +1581,13 @@ fn palette(
                     ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(s.doc.dimension_text(d))
-                                .family(theme::semibold())
-                                .size(12.5)
-                                .color(theme::ink()),
+                            egui::RichText::new(super::document::DrawingDoc::dimension_text(
+                                s.doc.drawing.sheet_of_annotation(id).unwrap_or(s.sheet()),
+                                d,
+                            ))
+                            .family(theme::semibold())
+                            .size(12.5)
+                            .color(theme::ink()),
                         );
                         ui.separator();
                         let sym = matches!(edited.tolerance, Tolerance::Symmetric { .. });

@@ -82,7 +82,7 @@ pub fn check_sheet(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Result<(),
 
 pub(crate) fn sheet_error(drawing: &crate::Drawing, sheet: &crate::Sheet) -> Option<String> {
     let pinned = drawing.model.pinned.as_str();
-    for view in &sheet.views {
+    for view in sheet.views.iter().filter(|view| view.is_printed()) {
         let label = || crate::project::view_label_in(drawing, sheet, view);
         if let Some(refusal) = drawing.refused_views.iter().find(|refusal| refusal.view == view.id) {
             return Some(format!(

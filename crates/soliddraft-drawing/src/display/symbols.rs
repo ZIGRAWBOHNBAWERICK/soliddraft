@@ -546,6 +546,7 @@ pub(super) fn set_items(
                         value,
                         text_mid: mid,
                         measurement_scale: 1.0 / view_scale,
+                        spans_break: false,
                         format: Dimension {
                             dim_type: set.dim_type,
                             ..Dimension::measured(DimensionKind::Ordinate, value, set.precision)
@@ -579,6 +580,7 @@ pub(super) fn set_items(
                     value,
                     text_mid: at.0,
                     measurement_scale: 1.0 / view_scale,
+                    spans_break: false,
                     format: Dimension {
                         dim_type: set.dim_type,
                         ..Dimension::measured(DimensionKind::Linear { orientation }, value, set.precision)

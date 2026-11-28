@@ -37,6 +37,9 @@ pub struct BoxKernel {
     pub refuse_direction: Option<Vec3>,
     /// Cuts sections square to an axis itself; without it sections are unsupported.
     pub sections: bool,
+    pub refuse_exact_section: bool,
+    /// Lets a preview cut take any plane: one square to no axis draws the box uncut.
+    pub inclined_mesh_cuts: bool,
 }
 
 /// One box in a [`BoxKernel`], bound as a read-only [`DrawingGeometry`].
@@ -263,8 +266,15 @@ impl BoxKernel {
         if !self.sections {
             return Err(KernelError::Unsupported("profiles".into()));
         }
+        if self.refuse_exact_section && !spec.view.preview {
+            return Err(KernelError::Unsupported("test exact section refused".into()));
+        }
         let frame = spec.view.frame().ok_or_else(|| KernelError::InvalidInput("view direction".into()))?;
         let n = frame.direction;
+        let square = [Vec3::X, Vec3::Y, Vec3::Z].into_iter().any(|a| n.dot(a).abs() > 1.0 - 1e-12);
+        if self.inclined_mesh_cuts && spec.view.preview && !square {
+            return Ok(SectionView { curves: self.view_curves_of(body, &spec.view)?, regions: Vec::new() });
+        }
         let axis = [Vec3::X, Vec3::Y, Vec3::Z]
             .into_iter()
             .position(|a| n.dot(a).abs() > 1.0 - 1e-12)

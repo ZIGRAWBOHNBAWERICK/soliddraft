@@ -11,7 +11,8 @@ use soliddraft_kernel_api::{Point2, Vec3};
 use crate::entity::EntityRef;
 use crate::ids::ViewId;
 use crate::part::{Part, PartIndex, round};
-use crate::project::{self, Contexts, ViewContext, view_bounds};
+use crate::project::{self, Contexts, ViewContext, ViewTransform, view_bounds};
+use crate::section_path::CutPath;
 use crate::sheet::Projection;
 use crate::view::{
     AlignAxis, Alignment, FoldDirection, HiddenLines, View, ViewDisplay, ViewGeometry, ViewKind, ViewScale,
@@ -35,6 +36,8 @@ fn blank(drawing: &Drawing, kind: ViewKind, display: ViewDisplay) -> View {
         crop: None,
         broken_out: Vec::new(),
         exploded: false,
+        breaks: Vec::new(),
+        half: None,
     }
 }
 
@@ -64,6 +67,99 @@ pub fn cutting_line(
     })
 }
 
+/// A bent cutting line on view `parent` through the model points `through`, in the
+/// parent's view millimetres: three points make an aligned cut about the middle one,
+/// an even number from four an offset cut. The first and last legs are carried on to
+/// 6 mm past the view's line work, as a straight cutting line reaches past it.
+pub fn cutting_path(
+    drawing: &Drawing,
+    part: &Part,
+    index: &PartIndex,
+    parent: ViewId,
+    through: &[Vec3],
+) -> Result<Vec<Point2>, DrawingError> {
+    let ctx = context(drawing, part, index, parent)?;
+    extend_cutting_line(drawing, parent, &ctx.xf, through.iter().map(|p| ctx.xf.unbroken().precise_point(*p)).collect())
+}
+
+/// Extends a bent cutting line in the unbroken view frame and projects it onto the parent.
+pub fn extend_cutting_line(
+    drawing: &Drawing,
+    parent: ViewId,
+    xf: &ViewTransform,
+    mut line: Vec<Point2>,
+) -> Result<Vec<Point2>, DrawingError> {
+    CutPath::of_line(&line, false).map_err(|e| DrawingError::BadRequest(format!("cutting line: {e}")))?;
+    let bbox = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?.geometry.bbox;
+    extend_trace(&mut line, xf, bbox);
+    let flat = xf.unbroken();
+    Ok(line.into_iter().map(|p| xf.precise_point(flat.unproject(p))).collect())
+}
+
+pub(crate) fn extend_trace(line: &mut [Point2], xf: &ViewTransform, [x0, y0, x1, y1]: [f64; 4]) {
+    let flat = xf.unbroken();
+    let [lo, hi] = [Point2::new(x0, y0), Point2::new(x1, y1)].map(|p| flat.precise_point(xf.unproject(p)));
+    let [x0, y0, x1, y1] = [lo.u, lo.v, hi.u, hi.v];
+    let m = 6.0;
+    // `from` carried away from `toward` until it leaves the view's box grown by m.
+    let reach = |from: Point2, toward: Point2| {
+        let (du, dv) = (from.u - toward.u, from.v - toward.v);
+        let len = du.hypot(dv);
+        let (du, dv) = (du / len, dv / len);
+        let exit = |p: f64, d: f64, lo: f64, hi: f64| {
+            if d > 1e-12 {
+                (hi + m - p) / d
+            } else if d < -1e-12 {
+                (lo - m - p) / d
+            } else {
+                f64::INFINITY
+            }
+        };
+        let t = exit(toward.u, du, x0, x1).min(exit(toward.v, dv, y0, y1));
+        if t > 0.0 && t.is_finite() { Point2::new(toward.u + du * t, toward.v + dv * t) } else { from }
+    };
+    let n = line.len();
+    line[0] = reach(line[0], line[1]);
+    line[n - 1] = reach(line[n - 1], line[n - 2]);
+}
+
+/// An offset cutting line through `centres` in order: a leg through each, horizontal
+/// or vertical, joined by square jogs halfway between one centre and the next.
+pub fn staggered_line(centres: &[Point2], horizontal: bool) -> Vec<Point2> {
+    let mut line = Vec::with_capacity(centres.len() * 2);
+    for (i, c) in centres.iter().enumerate() {
+        line.push(*c);
+        if let Some(next) = centres.get(i + 1) {
+            if horizontal {
+                let jog = (c.u + next.u) / 2.0;
+                line.extend([Point2::new(jog, c.v), Point2::new(jog, next.v)]);
+            } else {
+                let jog = (c.v + next.v) / 2.0;
+                line.extend([Point2::new(c.u, jog), Point2::new(next.u, jog)]);
+            }
+        }
+    }
+    // A middle centre is a point along its leg, not a corner.
+    let mut corners = Vec::with_capacity(line.len());
+    for p in line {
+        let n = corners.len();
+        if n >= 2 {
+            let (a, b): (Point2, Point2) = (corners[n - 2], corners[n - 1]);
+            let along = if horizontal {
+                (a.v - b.v).abs() < 1e-9 && (b.v - p.v).abs() < 1e-9
+            } else {
+                (a.u - b.u).abs() < 1e-9 && (b.u - p.u).abs() < 1e-9
+            };
+            if along {
+                corners[n - 1] = p;
+                continue;
+            }
+        }
+        corners.push(p);
+    }
+    corners
+}
+
 /// A section of view `parent` along `line` (two points in the parent's view
 /// millimetres), placed on sheet `sheet`: aligned with its parent on the side the sheet's
 /// projection angle puts it when both are on one sheet, otherwise at a free place.
@@ -79,11 +175,36 @@ pub fn new_section(
     flip: bool,
     label: Option<String>,
 ) -> Result<(View, ViewContext), DrawingError> {
+    new_section_along(drawing, part, index, sheet, parent, &line, flip, label)
+}
+
+/// A section of view `parent` along a straight or bent cutting line in the parent's
+/// view millimetres, placed as [`new_section`] places one. Two points make a straight
+/// cut, three an aligned cut whose second leg is revolved about the middle point into
+/// the plane of the first, and an even number from four an offset cut whose jogs cut
+/// nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn new_section_along(
+    drawing: &Drawing,
+    part: &Part,
+    index: &PartIndex,
+    sheet: usize,
+    parent: ViewId,
+    line: &[Point2],
+    flip: bool,
+    label: Option<String>,
+) -> Result<(View, ViewContext), DrawingError> {
     // The parent is projected once: for the cutting line's model points and, through
     // the same memo, for the section's frame.
     let mut memo = Contexts::new();
     project::compute_in(drawing, part, index, parent, &mut memo)?;
-    let model_line = line.iter().map(|p| memo[&parent].xf.unproject(*p)).collect();
+    let xf = memo[&parent].xf;
+    xf.check_section_parent()?;
+    let model_line: Vec<_> = line.iter().map(|p| xf.unproject(*p)).collect();
+    let flat: Vec<_> = model_line.iter().map(|p| xf.unbroken().precise_point(*p)).collect();
+    if flat.len() != 2 {
+        CutPath::of_line(&flat, flip).map_err(|e| DrawingError::BadRequest(format!("cutting line: {e}")))?;
+    }
     let kind = ViewKind::Section {
         parent,
         line: line.to_vec(),
@@ -95,11 +216,12 @@ pub fn new_section(
     let display = ViewDisplay { hidden: HiddenLines::Removed, ..ViewDisplay::ORTHOGRAPHIC };
     let mut view = blank(drawing, kind, display);
     let ctx = project::compute_view(drawing, part, index, &view, sheet, &mut memo)?;
+    project::reproject_parent_marks(&mut view.kind, &memo[&parent]);
     view.geometry = ctx.projected.geometry.clone();
     // The view goes where the eye is (third angle) or where the arrows point (first
     // angle), in line with its parent.
     let arrow =
-        project::section_arrow(&line, flip).ok_or(DrawingError::BadRequest("the cutting line has no length".into()))?;
+        project::section_arrow(&flat, flip).ok_or(DrawingError::BadRequest("the cutting line has no length".into()))?;
     let projection = drawing.sheets.get(sheet).map_or(Projection::FirstAngle, |s| s.projection);
     let side = match projection {
         Projection::ThirdAngle => Point2::new(-arrow.u, -arrow.v),
@@ -367,4 +489,21 @@ fn free_spot_with(
         }
     }
     best.map(|(_, p)| Point2::new(round(p.u), round(p.v)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_staggered_line_jogs_halfway_and_runs_through_middle_centres() {
+        let p = Point2::new;
+        let line = staggered_line(&[p(25.0, 23.0), p(115.0, 67.0)], true);
+        assert_eq!(line, [p(25.0, 23.0), p(70.0, 23.0), p(70.0, 67.0), p(115.0, 67.0)]);
+        // A centre in line with the next is passed through, not turned at.
+        let line = staggered_line(&[p(0.0, 0.0), p(10.0, 0.0), p(20.0, 5.0)], true);
+        assert_eq!(line, [p(0.0, 0.0), p(15.0, 0.0), p(15.0, 5.0), p(20.0, 5.0)]);
+        let line = staggered_line(&[p(0.0, 0.0), p(4.0, 10.0)], false);
+        assert_eq!(line, [p(0.0, 0.0), p(0.0, 5.0), p(4.0, 5.0), p(4.0, 10.0)]);
+    }
 }

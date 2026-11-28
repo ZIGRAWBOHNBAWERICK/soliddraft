@@ -10,8 +10,8 @@ use crate::theme;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_drawing::display::annotation_name;
 use soliddraft_drawing::display::scale_text;
-use soliddraft_drawing::project::effective_scale;
 use soliddraft_drawing::project::view_label_in;
+use soliddraft_drawing::project::{effective_scale, view_scale};
 use soliddraft_drawing::{AnnotationKind, AnnotationState, Command, Projection, ViewId, ViewKind, ViewScale};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -89,6 +89,32 @@ fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     match spec.tip {
         Some(t) => resp.on_hover_text(t),
         None => resp,
+    }
+}
+
+fn view_dot<'a>(
+    view: &soliddraft_drawing::View,
+    update_reason: Option<&str>,
+    annotations: impl Iterator<Item = &'a soliddraft_drawing::Annotation>,
+) -> Dot {
+    if update_reason.is_some() {
+        return Dot::Warn;
+    }
+    if !view.is_printed() {
+        return Dot::None;
+    }
+    let worst = annotations
+        .map(|a| match a.state {
+            AnnotationState::Ok => 0,
+            AnnotationState::Changed { .. } => 1,
+            AnnotationState::Dangling { .. } => 2,
+        })
+        .max()
+        .unwrap_or(0);
+    match worst {
+        2 => Dot::Error,
+        1 => Dot::Warn,
+        _ => Dot::Ok,
     }
 }
 
@@ -267,7 +293,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.close();
                 }
             });
-            let format_name = format!("Sheet format {}", s.doc.template().name.split(" ·").next().unwrap_or("").trim());
+            let format = soliddraft_drawing::library::template(s.doc.drawing.sheets[si].template.as_str());
+            let format_name = format!("Sheet format {}", format.name.split(" ·").next().unwrap_or("").trim());
             let r = row(
                 ui,
                 RowSpec {
@@ -307,7 +334,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 let update_reason = s.doc.view_update_reason(v);
                 // A derived view's scale and its location on another sheet.
                 let mut sub = String::new();
-                let own = effective_scale(sheet, v);
+                let own = view_scale(&s.doc.drawing, v.id).unwrap_or_else(|_| effective_scale(sheet, v));
                 if matches!(v.kind, ViewKind::Detail { .. })
                     || (v.scale != ViewScale::Sheet && (own - sheet.scale.factor()).abs() > 1e-9)
                 {
@@ -325,24 +352,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ViewKind::Auxiliary { .. } => Icon::Plane,
                     _ => Icon::Display,
                 };
-                let dot = if update_reason.is_some() {
-                    Dot::Warn
-                } else {
-                    let worst = sheet
-                        .annotations_of(id)
-                        .map(|a| match a.state {
-                            AnnotationState::Ok => 0,
-                            AnnotationState::Changed { .. } => 1,
-                            AnnotationState::Dangling { .. } => 2,
-                        })
-                        .max()
-                        .unwrap_or(0);
-                    match worst {
-                        2 => Dot::Error,
-                        1 => Dot::Warn,
-                        _ => Dot::Ok,
-                    }
-                };
+                let dot = view_dot(v, update_reason, sheet.annotations_of(id));
                 let open = s.expanded.contains(&id) || depth == 2;
                 let r = row(
                     ui,
@@ -453,7 +463,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 s.annotations_open = !s.annotations_open;
             }
             if s.annotations_open {
-                let style = s.doc.style();
+                let style = super::document::DrawingDoc::style(sheet);
                 for a in &sheet.annotations {
                     let name = annotation_name(a, style);
                     let view_name = if a.view == SHEET {
@@ -559,5 +569,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     });
     for a in actions {
         state.push(AppAction::Drawing(a));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fallback_view_has_no_status_dot() {
+        let drawing = soliddraft_drawing::fixture::bracket_a3();
+        let sheet = &drawing.sheets[0];
+        let mut view = sheet.views[0].clone();
+        assert!(view_dot(&view, None, std::iter::empty()) == Dot::Ok);
+        view.geometry.display_only = true;
+        assert!(view_dot(&view, None, sheet.annotations_of(view.id)) == Dot::None);
     }
 }

@@ -1,0 +1,31 @@
+{
+  "format": "soliddraft-recipe/1",
+  "name": "flange",
+  "description": "A radial pattern for aligned sections: a 100 mm disk 10 mm thick with a 40 mm hub 25 mm tall, a 20 mm bore and five 10 mm holes on a 70 mm bolt circle, the first on +X and the rest every 72 degrees anticlockwise.",
+  "steps": [
+    { "id": "disk_sketch", "op": "profile", "plane": "XY", "circle": { "center": [0, 0], "radius": 50 } },
+    { "id": "disk", "op": "extrude", "profile": "disk_sketch", "distance": 10 },
+    { "id": "hub_sketch", "op": "profile", "plane": "XY", "circle": { "center": [0, 0], "radius": 20 } },
+    { "id": "hub", "op": "extrude", "profile": "hub_sketch", "distance": 25 },
+    { "id": "hubbed", "op": "boolean", "kind": "union", "target": "disk", "tool": "hub" },
+    { "id": "bore_sketch", "op": "profile", "plane": { "base": "XY", "origin": [0, 0, -1] }, "circle": { "center": [0, 0], "radius": 10 } },
+    { "id": "bore_tool", "op": "extrude", "profile": "bore_sketch", "distance": 27 },
+    { "id": "bored", "op": "boolean", "kind": "subtract", "target": "hubbed", "tool": "bore_tool" },
+    { "id": "hole1_sketch", "op": "profile", "plane": { "base": "XY", "origin": [35, 0, -1] }, "circle": { "center": [0, 0], "radius": 5 } },
+    { "id": "hole1_tool", "op": "extrude", "profile": "hole1_sketch", "distance": 12 },
+    { "id": "hole1", "op": "boolean", "kind": "subtract", "target": "bored", "tool": "hole1_tool" },
+    { "id": "hole2_sketch", "op": "profile", "plane": { "base": "XY", "origin": [10.815594803123162, 33.28697807033037, -1] }, "circle": { "center": [0, 0], "radius": 5 } },
+    { "id": "hole2_tool", "op": "extrude", "profile": "hole2_sketch", "distance": 12 },
+    { "id": "hole2", "op": "boolean", "kind": "subtract", "target": "hole1", "tool": "hole2_tool" },
+    { "id": "hole3_sketch", "op": "profile", "plane": { "base": "XY", "origin": [-28.315594803123158, 20.572483830236564, -1] }, "circle": { "center": [0, 0], "radius": 5 } },
+    { "id": "hole3_tool", "op": "extrude", "profile": "hole3_sketch", "distance": 12 },
+    { "id": "hole3", "op": "boolean", "kind": "subtract", "target": "hole2", "tool": "hole3_tool" },
+    { "id": "hole4_sketch", "op": "profile", "plane": { "base": "XY", "origin": [-28.315594803123165, -20.572483830236557, -1] }, "circle": { "center": [0, 0], "radius": 5 } },
+    { "id": "hole4_tool", "op": "extrude", "profile": "hole4_sketch", "distance": 12 },
+    { "id": "hole4", "op": "boolean", "kind": "subtract", "target": "hole3", "tool": "hole4_tool" },
+    { "id": "hole5_sketch", "op": "profile", "plane": { "base": "XY", "origin": [10.815594803123153, -33.28697807033038, -1] }, "circle": { "center": [0, 0], "radius": 5 } },
+    { "id": "hole5_tool", "op": "extrude", "profile": "hole5_sketch", "distance": 12 },
+    { "id": "hole5", "op": "boolean", "kind": "subtract", "target": "hole4", "tool": "hole5_tool" }
+  ],
+  "result": "hole5"
+}

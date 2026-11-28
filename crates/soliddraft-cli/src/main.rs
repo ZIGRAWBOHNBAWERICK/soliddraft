@@ -147,6 +147,10 @@ asm     `soliddraft asm --help` describes the assembly commands.
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    dispatch(&args)
+}
+
+fn dispatch(args: &[String]) -> ExitCode {
     match args.first().map(String::as_str) {
         Some("journal") => journal::run(&args[1..]),
         Some("replay") => replay(&args[1..]),
@@ -219,6 +223,12 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+#[test]
+fn non_drawing_commands_leave_the_process_logger_unset() {
+    assert_eq!(dispatch(&["commands".into(), "--help".into()]), ExitCode::SUCCESS);
+    assert!(env_logger::Builder::new().try_init().is_ok());
 }
 
 fn replay(args: &[String]) -> ExitCode {

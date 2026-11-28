@@ -1,0 +1,19 @@
+{
+  "format": "soliddraft-recipe/1",
+  "name": "shaft",
+  "description": "A long shaft for half sections and break views: a 20 mm body 240 mm long along +X from the origin, a 12 mm journal 20 mm long at each end and a 6 mm bore through its length.",
+  "steps": [
+    { "id": "body_sketch", "op": "profile", "plane": "YZ", "circle": { "center": [0, 0], "radius": 10 } },
+    { "id": "body", "op": "extrude", "profile": "body_sketch", "distance": 240 },
+    { "id": "left_sketch", "op": "profile", "plane": { "base": "YZ", "origin": [-20, 0, 0] }, "circle": { "center": [0, 0], "radius": 6 } },
+    { "id": "left", "op": "extrude", "profile": "left_sketch", "distance": 20 },
+    { "id": "left_joined", "op": "boolean", "kind": "union", "target": "body", "tool": "left" },
+    { "id": "right_sketch", "op": "profile", "plane": { "base": "YZ", "origin": [240, 0, 0] }, "circle": { "center": [0, 0], "radius": 6 } },
+    { "id": "right", "op": "extrude", "profile": "right_sketch", "distance": 20 },
+    { "id": "right_joined", "op": "boolean", "kind": "union", "target": "left_joined", "tool": "right" },
+    { "id": "bore_sketch", "op": "profile", "plane": { "base": "YZ", "origin": [-21, 0, 0] }, "circle": { "center": [0, 0], "radius": 3 } },
+    { "id": "bore_tool", "op": "extrude", "profile": "bore_sketch", "distance": 282 },
+    { "id": "bored", "op": "boolean", "kind": "subtract", "target": "right_joined", "tool": "bore_tool" }
+  ],
+  "result": "bored"
+}

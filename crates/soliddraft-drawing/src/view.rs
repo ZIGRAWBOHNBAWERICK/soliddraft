@@ -44,19 +44,31 @@ pub struct View {
     /// For a view of an assembly: it shows the assembly's exploded view.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exploded: bool,
+    /// The interruption of a long view, stored as zero or one break.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<Break>,
+    /// A half section: one side of a symmetry line cut open to the plane through it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half: Option<HalfSection>,
 }
 
 impl View {
     /// True when the saved line work was drawn by the kernel's exact drawing queries,
     /// which is what an export writes.
     pub fn has_saved_catallax_linework(&self) -> bool {
-        self.geometry.catallax && !self.geometry.unproved
+        self.geometry.catallax && !self.geometry.unproved && !self.geometry.display_only
+    }
+
+    /// True when an export prints the view. A section drawn from the display mesh shows
+    /// on screen only, so it never blocks an export and is never counted in one.
+    pub fn is_printed(&self) -> bool {
+        !self.geometry.display_only
     }
 
     /// True when the view is excluded from automatic update and its saved line work
     /// cannot be exported, so it must be included and rebuilt first.
     pub fn needs_inclusion_for_redraw(&self) -> bool {
-        self.excluded_from_update && !self.has_saved_catallax_linework()
+        self.excluded_from_update && !self.has_saved_catallax_linework() && self.is_printed()
     }
 
     /// True when the view was drawn from `digest` or excluded from automatic update.
@@ -124,8 +136,11 @@ pub enum ViewKind {
     Section {
         /// The view the cutting line is drawn on.
         parent: ViewId,
-        /// The cutting line in the parent's view millimetres, from end to end. Only
-        /// straight cuts (two points) are built.
+        /// The cutting line in the parent's view millimetres, from end to end. Two
+        /// points make a straight cut. Three make an aligned cut: the second leg is
+        /// revolved about the middle point into the plane of the first. An even number
+        /// from four make an offset cut: parallel cuts joined by jogs square to them,
+        /// which cut no material.
         line: Vec<Point2>,
         /// True to look the other way along the cut.
         flip: bool,
@@ -299,6 +314,41 @@ pub struct BrokenOut {
     pub depth: f64,
 }
 
+/// A break in a view: the stretch of the part between two model points along one sheet
+/// direction is left out, and the view closes up to a gap between two break lines. The
+/// line work keeps its model references and the view its scale; dimensions across the
+/// break measure the model, so they keep their full length.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Break {
+    /// One end of the stretch left out, a model point.
+    pub from: Vec3,
+    /// The other end, a model point.
+    pub to: Vec3,
+    /// The sheet direction the view is shortened along: horizontal leaves out a stretch
+    /// of the view's width, vertical of its height.
+    pub axis: AlignAxis,
+}
+
+impl Break {
+    /// The gap between break lines, in sheet millimetres.
+    pub const GAP: f64 = 6.0;
+}
+
+/// A half section of a symmetric part: on one side of the symmetry line the material in
+/// front of the plane through that line, facing the eye, is removed and the cut is
+/// hatched; the other side shows the outside. The symmetry line is drawn as a centre
+/// line.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HalfSection {
+    /// Two model points on the symmetry line. The cutting plane holds the line and faces
+    /// the eye.
+    pub axis: [Vec3; 2],
+    /// False cuts the side to the left of the line run from its first point to its
+    /// second, as the view shows it; true cuts the right side.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+}
+
 /// The orientation of a base view.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -455,6 +505,9 @@ pub struct ViewGeometry {
     /// Digest of the model the geometry was made from. A view whose digest differs from
     /// the model's is out of date.
     pub source_digest: String,
+    /// The transform that produced this saved line work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<crate::project::ViewTransform>,
     /// Visible and hidden curves.
     pub curves: Vec<Curve2>,
     /// Regions to hatch, for section views.
@@ -469,6 +522,9 @@ pub struct ViewGeometry {
     /// it and are made from certified line work instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// The view uses a display section and has no exportable line work.
+    pub display_only: bool,
     /// The saved line work came from Catallax drawing queries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub catallax: bool,
@@ -476,6 +532,87 @@ pub struct ViewGeometry {
     /// Older caches have unknown quality and must be regenerated for export.
     #[serde(default = "unknown_quality")]
     pub coarse: bool,
+    /// Where the view's breaks close up, in view millimetres, for the break lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaks: Vec<BreakGap>,
+    /// A half section's symmetry line across the view, in view millimetres.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symmetry_segments: Vec<[Point2; 2]>,
+    /// Unclipped projected model bounds of a half section, in model millimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry_bounds: Option<[f64; 4]>,
+}
+
+/// A closed-up break as drawn: two break lines `gap` apart across the view.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BreakGap {
+    /// The sheet direction the view is shortened along.
+    pub axis: AlignAxis,
+    /// Where the first break line crosses that direction, in view millimetres.
+    pub at: f64,
+    /// The gap to the second break line, in sheet millimetres.
+    pub gap: f64,
+    #[serde(default = "mid_fraction")]
+    pub(crate) centre_fraction: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) omitted_mm: Option<f64>,
+}
+
+impl BreakGap {
+    pub(crate) fn along(self, p: Point2) -> f64 {
+        if self.axis == AlignAxis::Vertical { p.v } else { p.u }
+    }
+
+    pub(crate) fn unshift(self, p: Point2) -> Point2 {
+        let offset = self
+            .omitted_mm
+            .map_or(0.0, |omitted| (omitted - self.gap) * ((self.along(p) - self.at) / self.gap).clamp(0.0, 1.0));
+        if self.axis == AlignAxis::Vertical { Point2::new(p.u, p.v + offset) } else { Point2::new(p.u + offset, p.v) }
+    }
+
+    pub(crate) fn trace(self, a: Point2, b: Point2) -> [[Point2; 2]; 2] {
+        self.trace_flat(self.unshift(a), self.unshift(b))
+    }
+
+    pub(crate) fn trace_flat(self, a: Point2, b: Point2) -> [[Point2; 2]; 2] {
+        let (start, end) = (self.along(a), self.along(b));
+        let omitted = self.omitted_mm.unwrap_or(self.gap);
+        let far = self.at + omitted;
+        let shift = |p: Point2| {
+            let offset = omitted - self.gap;
+            if self.axis == AlignAxis::Vertical {
+                Point2::new(p.u, p.v - offset)
+            } else {
+                Point2::new(p.u - offset, p.v)
+            }
+        };
+        if start == end {
+            return if start <= self.at {
+                [[a, b], [b, b]]
+            } else if start >= far {
+                [[shift(a), shift(b)], [b, b]]
+            } else {
+                [[a, a], [b, b]]
+            };
+        }
+        let at = |t: f64| Point2::new(a.u + (b.u - a.u) * t, a.v + (b.v - a.v) * t);
+        let first = ((self.at - start) / (end - start)).clamp(0.0, 1.0);
+        let last = ((far - start) / (end - start)).clamp(0.0, 1.0);
+        if start < end {
+            [[a, at(first)], [shift(at(last)), shift(b)]]
+        } else {
+            [[shift(a), shift(at(last))], [at(first), b]]
+        }
+    }
+
+    pub(crate) fn contains(self, p: Point2) -> bool {
+        let p = self.along(p);
+        p > self.at && p < self.at + self.gap
+    }
+}
+
+fn mid_fraction() -> f64 {
+    0.5
 }
 
 fn unknown_quality() -> bool {
@@ -488,6 +625,9 @@ pub struct Curve2 {
     /// The curve in view millimetres. Stored as SVG path data with absolute commands.
     #[serde(with = "svg_path")]
     pub path: BezPath,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Projected endpoints of the source edge when the view clips a break.
+    pub ends: Option<[Point2; 2]>,
     /// The model entity it comes from.
     pub source: EntityRef,
     /// False when the model hides it.

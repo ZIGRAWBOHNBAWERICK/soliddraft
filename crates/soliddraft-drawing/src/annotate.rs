@@ -12,21 +12,34 @@ use crate::annotation::{
     StyleOverrides,
 };
 use crate::ids::ViewId;
-use crate::measure::{AnchorGeometry, measure_set, precision_for};
+use crate::measure::{measure_set, precision_for};
 use crate::part::{PartIndex, round};
 use crate::project::{ViewContext, ViewTransform};
 use crate::{Drawing, DrawingError};
 
 /// The anchor on the edge nearest `at`, with its point in the view of `xf`.
 pub fn anchor_near(index: &PartIndex, xf: &ViewTransform, at: Vec3) -> Option<Anchor> {
-    let (id, curve, _) = index
-        .edges()
-        .map(|(id, c)| {
-            let d = c.sample(0.0).windows(2).map(|w| segment_distance(at, w[0], w[1])).fold(f64::INFINITY, f64::min);
-            (id, c, d)
-        })
-        .min_by(|a, b| a.2.total_cmp(&b.2))?;
-    let entity = index.edge_ref(id)?;
+    let (id, curve) = nearest_edge(index, at)?;
+    anchor_on(index, xf, id, curve, 0, at)
+}
+
+pub(crate) fn nearest_edge<'a>(
+    index: &'a PartIndex<'_>,
+    at: Vec3,
+) -> Option<(soliddraft_kernel_api::EdgeId, &'a soliddraft_kernel_api::drawing::Curve3)> {
+    index.edges().min_by(|(_, a), (_, b)| curve_distance(a, at).total_cmp(&curve_distance(b, at)))
+}
+
+fn anchor_on(
+    index: &PartIndex,
+    xf: &ViewTransform,
+    id: soliddraft_kernel_api::EdgeId,
+    curve: &soliddraft_kernel_api::drawing::Curve3,
+    leg: u8,
+    at: Vec3,
+) -> Option<Anchor> {
+    let mut entity = index.edge_ref(id)?;
+    entity.section_leg = leg;
     let mut candidates =
         vec![(Attach::Start, curve.start()), (Attach::End, curve.end()), (Attach::Mid, curve.point_at(0.5))];
     if let soliddraft_kernel_api::drawing::Curve3::Arc { center, .. }
@@ -39,7 +52,70 @@ pub fn anchor_near(index: &PartIndex, xf: &ViewTransform, at: Vec3) -> Option<An
         .min_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at)))
         .filter(|(_, p)| p.distance(at) <= 1e-3)
         .unwrap_or((Attach::Point { at }, at));
+    let point = xf.leg_turn(leg).map_or(point, |turn| turn.point(point));
     Some(Anchor { entity, attach, cached: xf.point(point) })
+}
+
+/// The nearest model edge occurrence in the given view.
+pub fn view_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Option<Anchor> {
+    if ctx.xf.leg_turn(1).is_none() && ctx.xf.breaks.is_empty() {
+        return anchor_near(index, &ctx.xf, at);
+    }
+    let nearest = if ctx.xf.breaks.is_empty() { None } else { Some(curve_distance(nearest_edge(index, at)?.1, at)) };
+    use kurbo::{ParamCurveNearest, Point, Shape};
+    let (_, _, _, id, curve, leg) = ctx
+        .projected
+        .geometry
+        .curves
+        .iter()
+        .filter_map(|projected| {
+            if projected.kind != crate::CurveKind::Edge {
+                return None;
+            }
+            let bounds = projected.path.bounding_box();
+            if bounds.width().max(bounds.height()) <= 1e-6 {
+                return None;
+            }
+            let id = soliddraft_kernel_api::EdgeId::from_raw(projected.source.kernel_hint?);
+            let curve = index.edge_curve(id)?;
+            let distance = curve_distance(curve, at);
+            if nearest.is_some_and(|nearest| distance > nearest + 1e-6) {
+                return None;
+            }
+            let leg = projected.source.section_leg;
+            let at_on_leg = ctx.xf.point_on_leg(leg, at);
+            if !ctx.xf.retains(at_on_leg) {
+                return None;
+            }
+            let q = ctx.xf.precise_point(at_on_leg);
+            let nearest = projected
+                .path
+                .segments()
+                .map(|segment| segment.nearest(Point::new(q.u, q.v), 1e-6).distance_sq)
+                .fold(f64::INFINITY, f64::min);
+            Some((distance, nearest, !projected.visible, id, curve, leg))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)).then(a.5.cmp(&b.5)))?;
+    if ctx.xf.breaks.is_empty() {
+        return anchor_on(index, &ctx.xf, id, curve, leg, at);
+    }
+    let xf = ctx.xf.in_leg(leg);
+    let t = crate::project::parameter_on_drawn_edge(
+        &xf,
+        curve,
+        xf.precise_point(at),
+        ctx.projected_edges(id, leg).flat_map(|c| c.path.segments()),
+    )?;
+    let point = curve.point_at(t);
+    let mut anchor = anchor_on(index, &ctx.xf, id, curve, leg, point)?;
+    if matches!(anchor.attach, Attach::Point { .. } | Attach::Mid) {
+        anchor.attach = Attach::EdgeParameter { t };
+    }
+    Some(anchor)
+}
+
+fn curve_distance(curve: &soliddraft_kernel_api::drawing::Curve3, at: Vec3) -> f64 {
+    curve.sample(0.0).windows(2).map(|w| segment_distance(at, w[0], w[1])).fold(f64::INFINITY, f64::min)
 }
 
 fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
@@ -47,6 +123,21 @@ fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
     let len2 = ab.dot(ab);
     let t = if len2 > 0.0 { ((p - a).dot(ab) / len2).clamp(0.0, 1.0) } else { 0.0 };
     p.distance(a + ab * t)
+}
+
+fn dimension_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Option<Anchor> {
+    if ctx.xf.breaks.is_empty() {
+        return view_anchor_near(index, ctx, at);
+    }
+    if let Some(circle) = ctx
+        .projected
+        .circles
+        .iter()
+        .find(|circle| ctx.xf.point_on_leg(circle.entity.section_leg, at).distance(circle.model_centre) <= 1e-3)
+    {
+        return Some(Anchor { entity: circle.entity.clone(), attach: Attach::Centre, cached: circle.centre });
+    }
+    view_anchor_near(index, ctx, at)
 }
 
 fn new_annotation(
@@ -90,18 +181,25 @@ pub fn dimension_set(
     }
     let anchors: Vec<Anchor> = points
         .iter()
-        .map(|p| anchor_near(index, &ctx.xf, *p))
+        .map(|p| dimension_anchor_near(index, ctx, *p))
         .collect::<Option<_>>()
         .ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
-    let geometry: Vec<AnchorGeometry> = anchors
+    let originals: Vec<_> = anchors
         .iter()
-        .map(|a| {
-            let curve = match index.resolve(&a.entity) {
-                crate::Resolution::Found(crate::Entity::Edge(id)) => index.edge_curve(id),
-                _ => None,
-            };
-            AnchorGeometry { curve, point: a.entity.fingerprint.point, attach: a.attach }
+        .map(|a| match index.resolve(&a.entity) {
+            crate::Resolution::Found(crate::Entity::Edge(id)) => index.edge_curve(id),
+            _ => None,
         })
+        .collect();
+    let curves: Vec<_> = anchors
+        .iter()
+        .zip(&originals)
+        .map(|(anchor, original)| crate::update::anchor_curve(ctx, anchor, *original))
+        .collect();
+    let geometry: Vec<_> = anchors
+        .iter()
+        .zip(originals.iter().zip(&curves))
+        .map(|(anchor, (original, curve))| crate::update::anchor_geometry(&ctx.xf, anchor, *original, curve.as_deref()))
         .collect();
     let mut set = DimensionSet { kind, orientation, values: Vec::new(), precision: 0, dim_type: DimType::Projected };
     let values =
@@ -137,7 +235,7 @@ pub fn attached(
     body: AnnotationKind,
     offset: Point2,
 ) -> Result<Annotation, DrawingError> {
-    let anchor = anchor_near(index, &ctx.xf, at).ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
+    let anchor = view_anchor_near(index, ctx, at).ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
     let placement = Point2::new(round(anchor.cached.u + offset.u), round(anchor.cached.v + offset.v));
     Ok(new_annotation(drawing, ctx.id, body, vec![anchor], placement))
 }

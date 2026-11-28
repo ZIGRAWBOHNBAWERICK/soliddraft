@@ -16,7 +16,7 @@ pub fn png(list: &DisplayList, width_px: u32) -> Result<Vec<u8>, DrawingError> {
     pixmap.fill(Color::WHITE);
     // Millimetres, Y up, to pixels, Y down.
     let to_px = Transform::from_row(k as f32, 0.0, 0.0, -k as f32, 0.0, height_px as f32);
-    for item in list.printable() {
+    for item in list.sheet_items() {
         let Item::Path(p) = item else { continue };
         let Some(path) = skia_path(&p.path) else { continue };
         let [r, g, b] = super::colour(p.role);

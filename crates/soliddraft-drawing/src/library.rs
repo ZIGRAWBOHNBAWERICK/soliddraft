@@ -50,8 +50,9 @@ pub struct TemplateFile {
     /// The general notes block, if the template has one.
     #[serde(default)]
     pub notes: Option<NotesDef>,
+    /// A larger paper size made from a built-in template's family.
     #[serde(skip)]
-    staged: bool,
+    larger: bool,
 }
 
 fn default_units() -> String {
@@ -455,13 +456,15 @@ pub struct Library {
 }
 
 impl Library {
-    /// Templates offered in the drawing picker.
+    /// Templates offered in the drawing picker: the built-in sizes, the larger ones and
+    /// any from File locations.
     pub fn selectable_templates(&self) -> impl Iterator<Item = &TemplateFile> {
-        self.templates.iter().filter(|t| !t.staged)
+        self.templates.iter()
     }
 
-    pub(crate) fn staged_templates(&self) -> impl Iterator<Item = &TemplateFile> {
-        self.templates.iter().filter(|t| t.staged)
+    /// The larger paper sizes made from a built-in template's family.
+    pub(crate) fn larger_templates(&self) -> impl Iterator<Item = &TemplateFile> {
+        self.templates.iter().filter(|t| t.larger)
     }
 }
 
@@ -542,7 +545,7 @@ impl PaperPreset {
             scales: base.scales.clone(),
             title_block: base.title_block.clone(),
             notes: base.notes.clone(),
-            staged: true,
+            larger: true,
         }
     }
 }
@@ -711,7 +714,10 @@ mod tests {
     fn data_files_parse_and_match_the_model_templates() {
         let lib = library();
         let ids: Vec<&str> = lib.selectable_templates().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, ["iso-a3", "iso-a4", "ansi-b", "ansi-a"]);
+        assert_eq!(
+            ids,
+            ["iso-a3", "iso-a4", "ansi-b", "ansi-a", "iso-a2", "iso-a1", "iso-a0", "ansi-c", "ansi-d", "ansi-e"]
+        );
         for t in &lib.templates {
             let model = t.template();
             let builtin = Template::by_id(&t.id).expect("the model knows this template");

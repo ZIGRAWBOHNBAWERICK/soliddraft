@@ -29,17 +29,19 @@ The screen does not use those certified meshes. A proved body's viewport and fea
 
 Mesh exports and the mesh quality report use `tessellate`. A backend without a preview answers the preview calls with `tessellate`. See the [drawing document guide](documents.md#pinned-revisions-and-rebuild) for export eligibility and redraw guidance.
 
-A drawing context requires the current proved model body with its matching definition hash. During a dimension drag, pending proof or a failed edit, automatic following and Rebuild keep the last views and explain why they wait.
+A drawing context requires the current proved model body with its matching definition hash. Commands that use model geometry on an existing drawing also check the part against the drawing's model reference. During a dimension drag, pending proof or a failed edit, automatic following and Rebuild keep the last views and explain why they wait.
 
 Topology contains exact definitions and incidence with Catallax's proven measures: face areas, centroids and boxes, edge lengths and half-arc-length points, and the body's box. Mass properties include the proven centroidal inertia.
 
-See [Catallax backend gaps](needs-catallax.md) for the drawing query mapping. A preview section (`ViewSpec::preview`) cuts the preview mesh using `drawing::section::by_mesh_slice`. A saved section subtracts a half-space through a Catallax boolean (`by_half_space`) and reads the cut body's view and face loops. Saved curve accuracy distinguishes `exact` geometry, `polygon` paths such as sampled splines, and `approximate` geometry or placement. Export counts use the written paths. A cubic sheet path counts as approximate even if its source curve is exact.
+A preview section (`ViewSpec::preview`) cuts the preview mesh with `drawing::section::by_mesh_slice`. The saved section path subtracts a half-space with `by_half_space` and reads the cut body's view and face loops. Only a section view's own inclined cut can retry on the preview mesh when the saved section query fails. A successful retry logs the original error. See the [drawing query mapping](needs-catallax.md) and [export rules](documents.md#pinned-revisions-and-rebuild).
+
+Saved curve accuracy distinguishes `exact` geometry, `polygon` paths such as sampled splines, and `approximate` geometry or placement. Export counts use the written paths. A cubic sheet path counts as approximate even if its source curve is exact.
 
 On the full GPU tier, the part viewport clips the current proved display mesh and fills the section plane using stencil while the offset is dragged. Releasing the offset submits the same temporary half-space subtraction that WebGL2 uses throughout a drag. The live cap stays visible until the matching cut is ready. If the kernel refuses, the viewport keeps the cap and marks it display-only. It provides no pick IDs or measurement points. The worker accepts results only for the requested document, bodies, display version and plane. Section geometry never enters the model or exports.
 
 ## Request work
 
-The Catallax bridge selects the allowance at the numerical request boundary in `request.rs`. Cold STEP admission, exact builds and checked displays keep their existing defaults. Diagnostic runs can supply a measured allowance and mark calls over 20 million units; explicit bounded requests supply their own. Nested calls use the active allowance and report only their own charge. An exhausted STEP admission is not cached. Exports keep their separate ceiling and publish no incomplete output.
+The Catallax bridge selects the allowance at the numerical request boundary in `request.rs`. Cold STEP admission, exact builds and checked displays keep their existing defaults. Diagnostic runs can supply a measured allowance and mark calls over 20 million units. Explicit bounded requests supply their own. Drawing section views have no application work limit of their own. Nested calls use the active allowance and report only their own charge. An exhausted STEP admission is not cached. Exports keep their separate ceiling and publish no incomplete output.
 
 ## Construction before exact proof
 

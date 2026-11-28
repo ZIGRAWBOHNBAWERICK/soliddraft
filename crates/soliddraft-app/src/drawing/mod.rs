@@ -36,7 +36,7 @@ use soliddraft_document::DocumentId;
 use soliddraft_drawing::{
     AccuracyCounts, Anchor, Annotation, AnnotationId, AnnotationKind, AnnotationState, Command, ContentHash, DatumRef,
     DocKind, DocRef, Drawing, DrawingMeta, FoldDirection, GdtCharacteristic, Lay, LinearOrientation, MaterialCondition,
-    Projection, Scale, SetKind, StyleOverrides, SurfaceProcess, View, ViewId,
+    Projection, Scale, SetKind, StyleOverrides, SurfaceProcess, View, ViewId, ViewKind,
 };
 use soliddraft_kernel_api::Point2;
 use soliddraft_kernel_api::drawing::StandardView;
@@ -123,6 +123,10 @@ pub enum DrawingTool {
     /// A detail view: a click for the centre, one for the radius (or several for a
     /// profile), one to place.
     Detail,
+    /// A break: two clicks on a view mark the stretch left out.
+    Break,
+    /// A half section: two clicks on a view mark its symmetry axis.
+    HalfSection,
     /// An auxiliary view: click the reference edge, then place.
     Auxiliary,
     /// Crop a view to a rectangle: two corners.
@@ -159,6 +163,8 @@ impl DrawingTool {
             DrawingTool::Section { replace: None } => "Section view",
             DrawingTool::Section { replace: Some(_) } => "Redraw cutting line",
             DrawingTool::Detail => "Detail view",
+            DrawingTool::Break => "Break view",
+            DrawingTool::HalfSection => "Half section",
             DrawingTool::Auxiliary => "Auxiliary view",
             DrawingTool::Crop => "Crop view",
             DrawingTool::BrokenOut => "Broken-out section",
@@ -182,6 +188,8 @@ impl DrawingTool {
                 | DrawingTool::Auxiliary
                 | DrawingTool::Crop
                 | DrawingTool::BrokenOut
+                | DrawingTool::Break
+                | DrawingTool::HalfSection
         )
     }
 
@@ -247,6 +255,14 @@ impl DrawingTool {
                 0 => "Section · click where the cutting line starts; circle centres snap".into(),
                 _ => "Section · move for a horizontal or vertical line, click to finish it".into(),
             },
+            DrawingTool::Break => match picks {
+                0 => "Break · click on a view where the stretch to leave out starts".into(),
+                _ => "Break · click where it ends; the longer move picks horizontal or vertical".into(),
+            },
+            DrawingTool::HalfSection => match picks {
+                0 => "Half section · click a point on the view's symmetry axis; circle centres snap".into(),
+                _ => "Half section · click a second point on the axis".into(),
+            },
             DrawingTool::Detail if pending => "Detail · click to place the magnified view".into(),
             DrawingTool::Detail => match picks {
                 0 => "Detail · click the centre of the region on a view".into(),
@@ -303,6 +319,8 @@ pub enum DrawingSel {
     HoleTable(usize),
     /// The model reference: the part the drawing shows.
     Model,
+    /// The revision review of the saved drawing and its comment.
+    Review,
 }
 
 /// A feature control frame being built or edited.
@@ -421,6 +439,18 @@ pub struct PendingDerived {
     pub sheet: usize,
 }
 
+/// The shape of a section's cutting line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CutMode {
+    /// One straight line, horizontal or vertical.
+    #[default]
+    Straight,
+    /// Legs through the clicked centres joined by square jogs, which cut nothing.
+    Offset,
+    /// Two legs about a pivot: the second is revolved into the plane of the first.
+    Aligned,
+}
+
 /// What the derived-view and symbol tools hold between clicks, and the settings they
 /// keep from one use to the next.
 #[derive(Clone, Debug)]
@@ -437,6 +467,8 @@ pub struct ToolDraft {
     pub horizontal: bool,
     /// Section: the hatch pattern the cut faces get; `None` for the library's first.
     pub hatch: Option<String>,
+    /// Section: a straight, offset or aligned cutting line.
+    pub cut: CutMode,
     /// Detail: magnification relative to the parent.
     pub factor: f64,
     /// Detail: a drawn profile instead of a circle.
@@ -473,6 +505,7 @@ impl Default for ToolDraft {
             flip: false,
             horizontal: false,
             hatch: None,
+            cut: CutMode::Straight,
             factor: 2.0,
             profile: false,
             target_sheet: None,
@@ -491,10 +524,14 @@ impl Default for ToolDraft {
 }
 
 impl ToolDraft {
-    /// Forgets the clicks of the current use, keeping the settings.
-    pub fn reset(&mut self) {
+    fn clear_view_picks(&mut self) {
         self.view = None;
         self.points.clear();
+    }
+
+    /// Forgets the clicks of the current use, keeping the settings.
+    pub fn reset(&mut self) {
+        self.clear_view_picks();
         self.anchors.clear();
         self.chamfer = None;
         self.pending = None;
@@ -645,6 +682,7 @@ pub struct DrawingSession {
     pub fold_cache: HashMap<(ViewId, FoldDirection), (View, Projected)>,
     pub drag: Option<Drag>,
     pub note_edit: Option<NoteEdit>,
+    title_draft: Option<Command>,
     pub cursor: Option<Point2>,
     pub show_grid: bool,
     pub snap: bool,
@@ -675,6 +713,9 @@ pub struct DrawingSession {
     pub part_seen: Option<DocumentId>,
     /// The reference bar over the sheet was dismissed for the current state.
     pub marker_dismissed: bool,
+    /// The saved drawing compared against an earlier revision of its part, with the
+    /// review comment being written or read.
+    pub review: Option<revision_review::RevisionReview>,
 }
 
 impl DrawingSession {
@@ -696,6 +737,7 @@ impl DrawingSession {
             fold_cache: HashMap::new(),
             drag: None,
             note_edit: None,
+            title_draft: None,
             cursor: None,
             show_grid: false,
             snap: true,
@@ -713,6 +755,7 @@ impl DrawingSession {
             link: None,
             part_seen: None,
             marker_dismissed: false,
+            review: None,
         }
     }
 
@@ -732,6 +775,24 @@ impl DrawingSession {
         self.message = Some((text.into(), Instant::now()));
     }
 
+    fn commit_title_draft(&mut self) -> Result<(), String> {
+        if let Some(command) = self.title_draft.take() {
+            self.doc.apply(command, None)?;
+        }
+        Ok(())
+    }
+
+    fn show_sheet(&mut self, sheet: usize) {
+        if sheet < self.doc.drawing.sheets.len() && sheet != self.sheet {
+            self.sheet = sheet;
+            self.needs_fit = true;
+            self.selection = None;
+            self.note_edit = None;
+            self.title_draft = None;
+            self.sheet_rename = None;
+        }
+    }
+
     pub fn set_tool(&mut self, tool: DrawingTool) {
         self.tool = tool;
         self.picks.clear();
@@ -739,6 +800,15 @@ impl DrawingSession {
         self.pending = None;
         self.fold_cache.clear();
         self.draft.reset();
+        if let DrawingTool::Section { replace: Some(id) } = self.tool
+            && let Some(ViewKind::Section { parent, flip, hatch, .. }) = self.doc.drawing.view(id).map(|v| &v.kind)
+        {
+            self.draft.flip = *flip;
+            self.draft.hatch.clone_from(hatch);
+            if let Some(sheet) = project::sheet_of(&self.doc.drawing, *parent) {
+                self.show_sheet(sheet);
+            }
+        }
     }
 
     /// The prompt of the current tool at its current stage.
@@ -784,8 +854,8 @@ impl DrawingSession {
 
     /// Sheet position of a model point in a view, for automation and the hover label.
     pub fn sheet_point(&self, view: ViewId, model: soliddraft_kernel_api::Vec3) -> Option<Point2> {
-        let xf = self.doc.transforms.get(&view)?;
         let v = self.doc.drawing.view(view)?;
+        let xf = self.doc.transforms.get(&view).copied().or(v.geometry.transform)?;
         let p = xf.point(model);
         Some(Point2::new(p.u + v.position.u, p.v + v.position.v))
     }
@@ -919,6 +989,17 @@ pub enum DrawingAction {
     ShowLocations,
     /// Hide the reference bar until the reference's state changes.
     DismissMarker,
+    /// Compare the saved drawing's part with an earlier saved revision of it, picked
+    /// when `None`, and review the drawing.
+    ReviewRevisions(Option<PathBuf>),
+    /// Save the review comment as a new file beside the sources, picked when `None`.
+    SaveMarkup(Option<PathBuf>),
+    /// Open a review comment, picked when `None`, on this revision of the drawing.
+    OpenMarkup(Option<PathBuf>),
+    /// Show the review comment's annotation on its sheet.
+    ShowMarkup,
+    /// Finish the offset cutting line being drawn and compute the section.
+    FinishCut,
 }
 
 /// The part context for the current part, if it has a body.
@@ -1281,6 +1362,9 @@ pub(crate) fn update_views(state: &mut AppState) -> Result<String, String> {
         if !r.dangling.is_empty() {
             session.attention_focus = r.dangling.first().copied();
         }
+        for item in r.unplaced_pmi {
+            text.push_str(&format!(" · {}: {}", item.name, item.reason));
+        }
     }
     for refusal in session.doc.view_refusal_messages() {
         text.push_str(&format!(" · {refusal}"));
@@ -1331,7 +1415,7 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     let mut session = DrawingSession::new(doc);
     // Let the frame hook see the open part as first contact.
     session.seen_version = u64::MAX;
-    let views: usize = session.doc.drawing.sheets.iter().map(|s| s.views.len()).sum();
+    let views = session.doc.drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.is_printed()).count();
     let title = session.title();
     state.drawing.tree_hidden = false;
     state.drawing.session = Some(session);
@@ -1351,8 +1435,80 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     format!("{title} · {views} view{} · {words}", if views == 1 { "" } else { "s" })
 }
 
-/// Opens the drawing's part, found by the resolver, in the part tab when the part tab
-/// holds nothing unsaved.
+impl DrawingSession {
+    fn check_review_revision(&self, drawing: &crate::review::SavedDrawing) -> Result<(), &'static str> {
+        if self.doc.dirty || self.doc.path.is_none() || self.drag.as_ref().is_some_and(|drag| drag.moved) {
+            return Err("Save the drawing before reviewing it.");
+        }
+        if self.doc.id != drawing.pin().document || self.doc.saved_revision.as_ref() != Some(&drawing.pin().revision) {
+            return Err("The drawing changed. Start a review of the saved revision.");
+        }
+        Ok(())
+    }
+
+    fn review_ready(&self) -> Result<(), &'static str> {
+        let drawing = self.review.as_ref().and_then(|r| r.drawing()).ok_or("Open a drawing revision review first.")?;
+        self.check_review_revision(drawing)
+    }
+}
+
+/// Opens the review of the saved drawing: its part's file is the candidate, `baseline` the
+/// earlier revision. Nothing is written to either part or the drawing.
+fn review_revisions(state: &mut AppState, baseline: Option<PathBuf>) {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
+    use crate::review::{SavedDrawing, SavedRevision};
+    let Some(s) = state.drawing.session.as_mut() else { return };
+    let Some(drawing_path) = s.doc.path.clone().filter(|_| !s.doc.dirty) else {
+        s.say("Save the drawing first: the review reads the saved drawing");
+        return;
+    };
+    // The candidate is the saved revision the drawing shows, not a live part with its id.
+    let Some(candidate_path) = s.saved_model_file() else {
+        s.say("The saved part revision this drawing shows was not found, so there is no candidate to review");
+        return;
+    };
+    let baseline =
+        baseline.or_else(|| crate::platform::open_path("Compare with a saved revision", "SolidDraft part", &["dwprt"]));
+    let Some(baseline) = baseline else { return };
+    let kernel = state.doc.model().kernel().clone();
+    let review = (|| -> Result<revision_review::RevisionReview, String> {
+        let baseline = SavedRevision::open(&baseline, kernel.clone()).map_err(|e| e.to_string())?;
+        let candidate = SavedRevision::open(&candidate_path, kernel).map_err(|e| e.to_string())?;
+        let drawing = SavedDrawing::open(&drawing_path).map_err(|e| e.to_string())?;
+        s.check_review_revision(&drawing)?;
+        revision_review::RevisionReview::new(baseline, candidate).with_drawing(drawing).map_err(|e| e.to_string())
+    })();
+    match review {
+        Ok(review) => {
+            s.review = Some(review);
+            s.selection = Some(DrawingSel::Review);
+            s.set_tool(DrawingTool::Select);
+            state.options_details = true;
+        }
+        Err(e) => state.note(format!("The revisions could not be compared: {e}"), NoteKind::Error),
+    }
+}
+
+/// Goes to the review comment's sheet and keeps the review open beside it.
+fn show_markup(s: &mut DrawingSession) {
+    if let Err(error) = s.review_ready() {
+        s.say(error);
+        return;
+    }
+    let Some(place) = s.review.as_ref().and_then(|r| r.place()).copied() else { return };
+    if place.sheet < s.doc.drawing.sheets.len() && place.sheet != s.sheet {
+        s.sheet = place.sheet;
+        s.note_edit = None;
+        s.sheet_rename = None;
+    }
+    s.camera.centre = place.at;
+    s.needs_fit = false;
+    s.selection = Some(DrawingSel::Review);
+}
+
+/// Opens the drawing's part in the part tab when that tab holds nothing unsaved.
 fn open_model(state: &mut AppState) {
     match model_to_open(state) {
         Ok(Some(file)) => state.push(crate::state::AppAction::Open(Some(file))),
@@ -1448,7 +1604,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             let Some(new) = state.drawing.new.clone() else { return };
             match create_drawing(state, &new) {
                 Ok(session) => {
-                    let n = session.doc.drawing.sheets[0].views.len();
+                    let n = session.doc.drawing.sheets[0].views.iter().filter(|v| v.is_printed()).count();
                     state.drawing.tree_hidden = false;
                     state.drawing.session = Some(session);
                     state.drawing.new = None;
@@ -1490,10 +1646,53 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             }
         }
         DrawingAction::Command(cmd) => {
-            if let Err(e) = run_command(state, cmd)
-                && let Some(s) = state.drawing.session.as_mut()
-            {
-                s.say(e);
+            let repair = match &cmd {
+                Command::Reattach { annotation, end, .. } => Some((*annotation, *end)),
+                _ => None,
+            };
+            let redraw = match &cmd {
+                Command::EditView { view, kind: ViewKind::Section { .. } } => Some(*view),
+                _ => None,
+            };
+            let result = run_command(state, cmd);
+            if let Some(s) = state.drawing.session.as_mut() {
+                let redraw = redraw.filter(|id| s.tool == (DrawingTool::Section { replace: Some(*id) }));
+                match (result, redraw) {
+                    (Err(e), redraw) => {
+                        if redraw.is_some() {
+                            s.draft.clear_view_picks();
+                        }
+                        s.say(e);
+                    }
+                    (Ok(()), Some(id)) => {
+                        if let Some(sheet) = project::sheet_of(&s.doc.drawing, id) {
+                            s.show_sheet(sheet);
+                        }
+                        s.set_tool(DrawingTool::Select);
+                        s.selection = Some(DrawingSel::View(id));
+                        s.say("Cutting line redrawn");
+                    }
+                    (Ok(()), None) => {
+                        if let Some((annotation, end)) = repair
+                            && s.tool == (DrawingTool::Reattach { annotation, end })
+                        {
+                            let next = s.doc.drawing.annotation(annotation).and_then(|a| match &a.state {
+                                soliddraft_drawing::AnnotationState::Dangling { lost, .. } => lost.first().copied(),
+                                _ => None,
+                            });
+                            if let Some(next) = next {
+                                s.set_tool(DrawingTool::Reattach { annotation, end: next });
+                                s.say(format!("Reattached end {} · now pick for end {}", end + 1, next + 1));
+                            } else {
+                                s.set_tool(DrawingTool::Select);
+                                s.say("Reattached; the dimension is measured again");
+                                state.push(crate::state::AppAction::Drawing(DrawingAction::Select(Some(
+                                    DrawingSel::Annotation(annotation),
+                                ))));
+                            }
+                        }
+                    }
+                }
             }
         }
         DrawingAction::Undo => {
@@ -1618,6 +1817,51 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 }
             }
         }
+        DrawingAction::ReviewRevisions(path) => review_revisions(state, path),
+        DrawingAction::SaveMarkup(path) => {
+            if cfg!(target_arch = "wasm32") {
+                return;
+            }
+            let Some(s) = state.drawing.session.as_mut() else { return };
+            if let Err(error) = s.review_ready() {
+                s.say(error);
+                return;
+            }
+            let Some(review) = s.review.as_ref() else { return };
+            let path =
+                path.or_else(|| crate::platform::save_path("Save markup", "Review markup", "json", "review.json"));
+            let Some(path) = path else { return };
+            match review.save_markup(&path) {
+                Ok(()) => state.note(format!("Saved {}", path.display()), NoteKind::Ok),
+                Err(e) => state.note(format!("The markup was not saved: {e}"), NoteKind::Error),
+            }
+        }
+        DrawingAction::OpenMarkup(path) => {
+            if cfg!(target_arch = "wasm32") {
+                return;
+            }
+            let Some(s) = state.drawing.session.as_mut() else { return };
+            if let Err(error) = s.review_ready() {
+                s.say(error);
+                return;
+            }
+            let Some(review) = s.review.as_mut() else { return };
+            let path = path.or_else(|| crate::platform::open_path("Open markup", "Review markup", &["json"]));
+            let Some(path) = path else { return };
+            match review.open_markup(&path) {
+                Ok(()) => {
+                    show_markup(s);
+                    state.options_details = true;
+                }
+                Err(e) => state.note(format!("The markup was not opened: {e}"), NoteKind::Error),
+            }
+        }
+        DrawingAction::ShowMarkup => {
+            if let Some(s) = state.drawing.session.as_mut() {
+                show_markup(s);
+                state.options_details = true;
+            }
+        }
         DrawingAction::Export { format, path } => export_sheet(state, format, path),
         DrawingAction::Save(path) => save_drawing(state, path),
         DrawingAction::ModelItems => {
@@ -1635,7 +1879,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 Some(DrawingSel::View(id)) => vec![id],
                 _ => s.sheet().views.iter().map(|v| v.id).collect(),
             };
-            let added = add_centre_marks(s, &views);
+            let added = add_centre_marks(s, &state.doc, &views);
             s.say(format!("{added} centre mark{} added", if added == 1 { "" } else { "s" }));
         }
         DrawingAction::StartReattach { annotation, end } => {
@@ -1680,15 +1924,8 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             }
         }
         DrawingAction::SetSheet(i) => {
-            if let Some(s) = state.drawing.session.as_mut()
-                && i < s.doc.drawing.sheets.len()
-                && i != s.sheet
-            {
-                s.sheet = i;
-                s.needs_fit = true;
-                s.selection = None;
-                s.note_edit = None;
-                s.sheet_rename = None;
+            if let Some(s) = state.drawing.session.as_mut() {
+                s.show_sheet(i);
             }
         }
         DrawingAction::AddSheet => {
@@ -1700,6 +1937,13 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::DeleteSheet(i) => {
             let Some(s) = state.drawing.session.as_mut() else { return };
+            if s.title_draft.as_ref().and_then(title_edit_sheet) == Some(i) {
+                s.title_draft = None;
+            }
+            if let Err(error) = s.commit_title_draft() {
+                s.say(error);
+                return;
+            }
             let name = s.doc.drawing.sheets.get(i).map(|sh| sh.name.clone()).unwrap_or_default();
             match s.doc.apply(Command::DeleteSheet { sheet: i }, None) {
                 Ok(()) => {
@@ -1716,6 +1960,10 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::MoveSheet { sheet, to } => {
             let Some(s) = state.drawing.session.as_mut() else { return };
+            if let Err(error) = s.commit_title_draft() {
+                s.say(error);
+                return;
+            }
             match s.doc.apply(Command::MoveSheet { sheet, to }, None) {
                 Ok(()) => {
                     if s.sheet == sheet {
@@ -1731,6 +1979,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
         }
         DrawingAction::FlipPending => tools::flip_pending(state),
         DrawingAction::CloseProfile => tools::close_profile(state),
+        DrawingAction::FinishCut => tools::finish_cut_action(state),
         DrawingAction::MoveViewToSheet { view, sheet } => {
             let Some(s) = state.drawing.session.as_mut() else { return };
             let Some(v) = s.doc.drawing.view(view).cloned() else { return };
@@ -1758,17 +2007,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
 /// Runs a drawing command as one undo step, with the open part when the command reads
 /// it. A command that reads the part refuses when the open part is not the drawing's.
 pub(crate) fn run_command(state: &mut AppState, cmd: Command) -> Result<(), String> {
-    let needs_part = matches!(
-        cmd,
-        Command::UpdateFromModel
-            | Command::Reattach { .. }
-            | Command::EditView { .. }
-            | Command::SetViewCrop { .. }
-            | Command::AddBrokenOut { .. }
-            | Command::RemoveBrokenOut { .. }
-            | Command::ReattachView { .. }
-            | Command::SetViewDisplay { .. }
-    );
+    let needs_part = state.drawing.session.as_ref().is_some_and(|s| cmd.uses_part(&s.doc.drawing));
     if needs_part && !part_is_model(state) {
         return Err("The open part is not the one this drawing shows".into());
     }
@@ -1814,6 +2053,7 @@ fn after_history(s: &mut DrawingSession, sheet: Option<String>) {
     s.hover_label = None;
     s.drag = None;
     s.note_edit = None;
+    s.title_draft = None;
     s.sheet_rename = None;
     s.attention_focus = None;
 }
@@ -1823,23 +2063,40 @@ fn after_history(s: &mut DrawingSession, sheet: Option<String>) {
 pub(crate) fn import_model_items(state: &mut AppState) -> Result<String, String> {
     let ctx = PartContext::new(&state.doc).ok_or("Model items: the part has no body")?;
     let s = state.drawing.session.as_mut().ok_or("No drawing is open")?;
-    let items = model_items(&ctx, &s.doc.drawing, s.sheet).map_err(|e| format!("Model items: {e}"))?;
-    let n = items.len();
-    for a in items {
-        let _ = s.doc.apply(Command::AddAnnotation { annotation: a }, None);
+    if !s.model_is(ctx.id) {
+        return Err("The open part is not the one this drawing shows".into());
     }
-    Ok(if n == 0 {
-        "Model items: every model dimension is already on the sheet".to_owned()
-    } else {
-        format!("Model items: {n} dimension{} imported", if n == 1 { "" } else { "s" })
+    let (items, skipped) = model_items(&ctx, &s.doc.drawing, s.sheet).map_err(|e| format!("Model items: {e}"))?;
+    if items.is_empty() && skipped.is_empty() {
+        return Ok("Model items: every model dimension is already on the sheet".to_owned());
+    }
+    let total = items.len();
+    let (mut added, mut failure) = (0, None);
+    for a in items {
+        // With the part, so a dimension on a broken view is measured from the model.
+        match s.doc.apply(Command::AddAnnotation { annotation: a }, Some(&ctx)) {
+            Ok(()) => added += 1,
+            Err(e) => {
+                failure.get_or_insert(e);
+            }
+        }
+    }
+    let mut imported = format!("Model items: {added} dimension{} imported", if added == 1 { "" } else { "s" });
+    if !skipped.is_empty() {
+        imported.push_str(&format!("; {}", skipped.join("; ")));
+    }
+    Ok(match failure {
+        None => imported,
+        Some(e) => format!("{imported}; {} could not be added: {e}", total - added),
     })
 }
 
 /// Adds a centre mark to every circle the views show face-on that has none, one undo
 /// step each. Returns how many it added.
-pub(crate) fn add_centre_marks(s: &mut DrawingSession, views: &[ViewId]) -> usize {
+pub(crate) fn add_centre_marks(s: &mut DrawingSession, doc: &Document, views: &[ViewId]) -> usize {
     let mut added = 0;
     for &id in views {
+        tools::cache_picking(s, doc, id);
         let Some(p) = s.doc.projected_of(id) else { continue };
         let marks = project::centre_marks(&p, id, s.doc.next_annotation_id().0);
         for m in marks {
@@ -1897,7 +2154,7 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
     });
     let Some(path) = path else { return };
     let path = if path.extension().is_none() { path.with_extension(format.extension()) } else { path };
-    let written = write_sheet(s, format, &path);
+    let written = s.commit_title_draft().and_then(|()| write_sheet(s, format, &path));
     match written {
         Ok(w) => {
             // The kernel fitted these curves or measured where they cut and hide: Q14
@@ -1919,11 +2176,11 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
 /// What an export wrote, for the status line and the agent tools.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetExport {
-    /// Views on the sheets written.
+    /// Views printed on the sheets written.
     pub views: usize,
     /// The part revision accepted by the drawing.
     pub pinned_revision: ContentHash,
-    /// Distinct part revisions of the written views.
+    /// Distinct part revisions of the printed views.
     pub view_revisions: std::collections::BTreeSet<String>,
     /// How many written curves are exact, mesh polylines or approximate.
     pub accuracy: AccuracyCounts,
@@ -1979,7 +2236,7 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
     let failures: Vec<_> = s
         .doc
         .refused_views()
-        .filter(|(i, ..)| writes_sheet(*i))
+        .filter(|(i, id, ..)| writes_sheet(*i) && drawing.view(*id).is_some_and(View::is_printed))
         .map(|(_, _, name, cause)| format!("{name}: {cause}"))
         .collect();
     if !failures.is_empty() {
@@ -1989,8 +2246,9 @@ pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<Pre
     let mut view_revisions = std::collections::BTreeSet::new();
     for (_, sheet) in drawing.sheets.iter().enumerate().filter(|(i, _)| writes_sheet(*i)) {
         export::check_sheet(drawing, sheet).map_err(|error| error.to_string())?;
-        views += sheet.views.len();
-        view_revisions.extend(sheet.views.iter().map(|view| view.geometry.source_digest.clone()));
+        let printed = sheet.views.iter().filter(|view| view.is_printed());
+        views += printed.clone().count();
+        view_revisions.extend(printed.map(|view| view.geometry.source_digest.clone()));
     }
     let count = drawing.sheets.len();
     let list_of = |i: usize| {
@@ -2023,7 +2281,9 @@ fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {
     });
     let Some(path) = path else { return };
     let kernel = state.doc.kernel().backend();
-    match save_session(s, &path, &format!("{} {}", kernel.name, kernel.version)) {
+    let saved =
+        s.commit_title_draft().and_then(|()| save_session(s, &path, &format!("{} {}", kernel.name, kernel.version)));
+    match saved {
         Ok((path, warning)) => {
             s.say(format!("Saved {}", path.display()));
             match warning {
@@ -2047,18 +2307,41 @@ pub(crate) fn save_session(
     let path = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
     let previous_path = s.doc.path.clone();
     let previous_model = s.doc.drawing.model.clone();
-    let target = s.model_target().map(|t| (t.path().map(Path::to_path_buf), t.id()));
-    if let Some((file, id)) = target {
-        if let Some(file) = file {
-            s.doc.drawing.model.set_path(&path, &file);
-        }
-        if s.doc.drawing.model.id.is_none() {
-            s.doc.drawing.model.id = id;
-        }
+    let target = s.model_target();
+    let id = target.and_then(|t| t.id());
+    let file = s
+        .saved_model_file()
+        .or_else(|| {
+            target
+                .filter(|t| previous_model.id.is_none() || t.revision() == Some(&previous_model.pinned))
+                .and_then(|t| t.path())
+                .map(Path::to_path_buf)
+        })
+        .or_else(|| (!previous_model.path.is_empty()).then(|| s.model_stored_path()));
+    if let Some(file) = file {
+        s.doc.drawing.model.set_path(&path, &file);
     }
-    let warning = s.doc.save(&path, kernel)?;
+    if previous_model.id.is_none() {
+        s.doc.drawing.model.id = id;
+    }
+    let warning = match s.doc.save(&path, kernel) {
+        Ok(warning) => warning,
+        Err(error) => {
+            s.doc.drawing.model = previous_model;
+            return Err(error);
+        }
+    };
     s.doc.rebase_history_paths(previous_path.as_deref(), &previous_model);
     Ok((path, warning))
+}
+
+pub(crate) fn title_edit_sheet(command: &Command) -> Option<usize> {
+    match command {
+        Command::SetTitleField { sheet, .. }
+        | Command::BindTitleProperty { sheet, .. }
+        | Command::SetTitleLayout { sheet, .. } => Some(*sheet),
+        _ => None,
+    }
 }
 
 /// The bottom bar's status while the drawing is active: whether the sheet is up to date
@@ -2099,7 +2382,7 @@ pub fn status(state: &AppState) -> Option<Status> {
         Projection::FirstAngle => "first angle",
         Projection::ThirdAngle => "third angle",
     };
-    let n = sheet.views.len();
+    let n = sheet.views.iter().filter(|v| v.is_printed()).count();
     let mut details = vec![
         format!("Sheet {} of {}", s.sheet + 1, s.doc.drawing.sheets.len()),
         format!("{} · {} · {projection}", sheet.size.name, sheet.scale),
@@ -2130,10 +2413,15 @@ pub fn status(state: &AppState) -> Option<Status> {
 /// The part's dimensions brought into the views of sheet `sheet`, once: those the sheet
 /// already shows are left out. The annotations are returned for the caller to add as
 /// commands.
-fn model_items(ctx: &PartContext<'_>, drawing: &Drawing, sheet: usize) -> Result<Vec<Annotation>, String> {
+fn model_items(
+    ctx: &PartContext<'_>,
+    drawing: &Drawing,
+    sheet: usize,
+) -> Result<(Vec<Annotation>, Vec<String>), String> {
     let mut copy = drawing.clone();
     let before = copy.sheets[sheet].annotations.len();
-    soliddraft_drawing::model_items::import_part(&mut copy, sheet, &ctx.part()).map_err(|e| e.to_string())?;
+    let report =
+        soliddraft_drawing::model_items::import_part(&mut copy, sheet, &ctx.part()).map_err(|e| e.to_string())?;
     let existing = &drawing.sheets[sheet].annotations;
     let same = |a: &Annotation, b: &Annotation| match (&a.body, &b.body) {
         (AnnotationKind::Dimension(x), AnnotationKind::Dimension(y)) => {
@@ -2146,12 +2434,13 @@ fn model_items(ctx: &PartContext<'_>, drawing: &Drawing, sheet: usize) -> Result
         }
         _ => false,
     };
-    Ok(copy.sheets[sheet]
+    let items = copy.sheets[sheet]
         .annotations
         .split_off(before)
         .into_iter()
         .filter(|a| !existing.iter().any(|e| same(a, e)))
-        .collect())
+        .collect();
+    Ok((items, report.skipped))
 }
 
 #[cfg(test)]

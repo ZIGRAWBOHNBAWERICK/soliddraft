@@ -2953,7 +2953,12 @@ impl Kernel for CatallaxKernel {
             } else {
                 drawing_queries::check_exact_tolerance(&spec.view)?;
                 drawing_queries::drawing_solid(self, body, "section_view")?;
-                drawing::section::by_half_space(self, body, spec)
+                // A drawing view has no work limit of its own: the cut, its body's
+                // topology and its line work share one unlimited allowance, or the
+                // caller's when a request is already running.
+                RequestPolicy::Limited(request::UNLIMITED_WORK)
+                    .run(|| drawing::section::by_half_space(self, body, spec))
+                    .0
             }
         })
     }

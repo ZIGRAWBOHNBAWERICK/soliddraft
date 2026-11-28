@@ -571,11 +571,11 @@ impl ViewportState {
         // Browser checks read whether a field sample is on screen; the user sees no label.
         #[cfg(target_arch = "wasm32")]
         {
-            let unproved =
+            let field_preview =
                 doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok()));
             input.part_probe = Some(render::PartProbe {
                 camera: self.camera.clone(),
-                unproved,
+                field_preview,
                 pending: doc.proof_pending(),
                 display_state: doc.display_state().map(|state| state.name.clone()),
                 display_mode: input.display.label().to_string(),

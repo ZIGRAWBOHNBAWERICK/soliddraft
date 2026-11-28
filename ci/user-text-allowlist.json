@@ -1,0 +1,52 @@
+[
+  {
+    "file": "crates/soliddraft-app/src/assembly.rs",
+    "text": "unchecked",
+    "why": "Freshness status name in the browser probe JSON for assembly checks; never drawn."
+  },
+  {
+    "file": "crates/soliddraft-app/src/drawing/properties_drawing.rs",
+    "text": "checked",
+    "why": "Saved format_overrides key of the title block's checker field; the panel labels it Checker."
+  },
+  {
+    "file": "crates/soliddraft-assembly/src/mates/mod.rs",
+    "text": "uncertified",
+    "why": "RefusalCode::as_str, a machine refusal code for MCP and logs; the mate panel shows a headline instead."
+  },
+  {
+    "file": "crates/soliddraft-exchange/src/proof.rs",
+    "text": "proof",
+    "why": "Suffix of the report files older versions wrote; read only, so their exports still open. New reports are named .precision."
+  },
+  {
+    "file": "crates/soliddraft-kernel-catallax/src/lib.rs",
+    "text": "checked",
+    "why": "Recipe element tag passed to sweep::path_step; an identifier, never shown."
+  },
+  {
+    "file": "crates/soliddraft-model/src/pmi/inspection/as9102.rs",
+    "text": "10. Certificate of Conformance Number",
+    "why": "AS9102C Form 1 field title, fixed by the standard, written into the exported inspection workbook."
+  },
+  {
+    "file": "crates/soliddraft-model/src/pmi/inspection/as9102.rs",
+    "text": "20. FAIR Verified By",
+    "why": "AS9102C Form 1 field title, fixed by the standard, written into the exported inspection workbook."
+  },
+  {
+    "file": "crates/soliddraft-model/src/pmi/inspection/as9102.rs",
+    "text": "21. Verification Date",
+    "why": "AS9102C Form 1 field title, fixed by the standard, written into the exported inspection workbook."
+  },
+  {
+    "file": "crates/soliddraft-model/src/pmi/inspection/as9102.rs",
+    "text": "9. Customer Approval Verification",
+    "why": "AS9102C Form 1 field title, fixed by the standard, written into the exported inspection workbook."
+  },
+  {
+    "file": "crates/soliddraft-model/src/pmi/inspection/as9102.rs",
+    "text": "AS9102C Form 3 \\u{2014} Characteristic Accountability, Verification and Compatibility Evaluation",
+    "why": "AS9102C Form 3 title, fixed by the standard, written into the exported inspection workbook."
+  }
+]

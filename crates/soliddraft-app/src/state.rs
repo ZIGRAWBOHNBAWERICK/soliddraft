@@ -2049,7 +2049,10 @@ impl AppState {
         }
         let proof = self.doc.proof_state();
         if proof.answered_within_bound && !proof.display_only_bound {
-            return Err("This answer is within a stated bound. Export requires a proved result.".into());
+            return Err(
+                "This part can't be exported: its body is built only within a stated bound, not as an exact solid."
+                    .into(),
+            );
         }
         if self.doc.proof_pending() {
             return Err("The current edit is still working. Export waits for it.".into());

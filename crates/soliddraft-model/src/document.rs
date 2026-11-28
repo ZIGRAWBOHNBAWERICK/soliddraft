@@ -424,7 +424,7 @@ impl Document {
                     let (answer_kind, message) = if feature.suppressed || index >= active {
                         (AnswerKind::Inactive, Some("Suppressed or past the rollback bar".into()))
                     } else if index >= self.dirty {
-                        (AnswerKind::Pending, Some("Waiting for proof".into()))
+                        (AnswerKind::Pending, Some("Waiting to build".into()))
                     } else {
                         match self.status(feature.id) {
                             Some(FeatureStatus::Ok)
@@ -436,7 +436,7 @@ impl Document {
                             {
                                 (
                                     AnswerKind::Approximate,
-                                    Some("Tolerant import, without a whole-body certificate".into()),
+                                    Some("Tolerant import, fitted within local tolerances".into()),
                                 )
                             }
                             Some(FeatureStatus::Ok)
@@ -447,10 +447,7 @@ impl Document {
                                     )
                                 }) =>
                             {
-                                (
-                                    AnswerKind::Approximate,
-                                    Some("Built within a stated tolerance, with no exact proof".into()),
-                                )
+                                (AnswerKind::Approximate, Some("Built within a stated tolerance, not exact".into()))
                             }
                             Some(FeatureStatus::Ok) => (AnswerKind::Proved, None),
                             Some(FeatureStatus::Failed(reason)) => (AnswerKind::Refused, Some(reason.clone())),
@@ -460,7 +457,7 @@ impl Document {
                             Some(FeatureStatus::Blocked(input)) => {
                                 (AnswerKind::Pending, Some(format!("Waiting for {input} to build")))
                             }
-                            _ => (AnswerKind::Pending, Some("Waiting for proof".into())),
+                            _ => (AnswerKind::Pending, Some("Waiting to build".into())),
                         }
                     };
                     FeatureProof {

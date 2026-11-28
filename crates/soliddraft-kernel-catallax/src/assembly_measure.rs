@@ -14,7 +14,7 @@ use soliddraft_kernel_api::*;
 use crate::CatallaxKernel;
 
 fn refused(what: String) -> KernelError {
-    KernelError::Unsupported(format!("proven support plane: {what}"))
+    KernelError::Unsupported(format!("exact support plane: {what}"))
 }
 
 /// A refusal of an exact axis or point.

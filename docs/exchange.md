@@ -39,15 +39,15 @@ A field's mass stand-in is a separate STEP output, written only when asked for: 
 ## Print check and independent part check
 
 Desktop mesh export opens Print check before writing a destination. It shows the selected
-print route, requested and certified accuracy, and the model, tessellation and file-rounding
+print route, requested and reached accuracy, and the model, tessellation and file-rounding
 contributions. OBJ and 3MF write each binary32 position as its exact decimal value,
 so text encoding adds no further coordinate error. The qualification checks closure, vertex connections, outward orientation,
 and preservation of components and cavities. Field exports show their native field verdict,
-minimum detail and certified distance bound.
+minimum detail and distance bound.
 
 An accuracy or refinement refusal offers a button labelled with a coarser accuracy. Each
 choice runs a fresh check on the same representation and leaves saved settings unchanged.
-Save checked export writes only the accepted bytes. Cancel and refusals leave an existing
+Save export writes only the accepted bytes. Cancel and refusals leave an existing
 file alone. Changing or reopening the part invalidates the report. MCP mesh exports accept
 an optional `accuracy_mm` for the same explicit choice and return structured `evidence`
 beside the summary. They never retry with a coarser accuracy automatically.
@@ -111,7 +111,7 @@ Changed source bytes for a selected STEP import replace the whole file only when
 
 The part file keeps the original source bytes, their SHA-256, repair decisions and the import record. Tolerant records also retain the reader's controls, body tiers and admission evidence. Reopening checks the digest and verifies the saved record against the source before rebuilding the body. An approved source repair is saved under its question as `accept:<tolerance-mm>:<approver>`. Repairs never overwrite the source file. STEP export reports whether the result is certified or tolerant; tolerant output carries no whole-body certificate.
 
-Further features are available where Catallax supports the imported body. Certified imports support fillet, chamfer, extrude, cut, hole, shell, pattern, mirror and draft. Their faces keep their `Import1 · Face N` names through those features, save and reopen. A tolerant body is not cast to an exact solid to enable an unsupported feature. Lattice and Gyroid are available when Catallax can build a field from the imported geometry. The viewport draws a sample of the field. Export certifies the clipped field at the requested accuracy before writing STL. The `import-features` scenario replays the certified steps over MCP.
+Further features are available where Catallax supports the imported body. Certified imports support fillet, chamfer, extrude, cut, hole, shell, pattern, mirror and draft. Their faces keep their `Import1 · Face N` names through those features, save and reopen. A tolerant body is not cast to an exact solid to enable an unsupported feature. Lattice and Gyroid are available when Catallax can build a field from the imported geometry. The viewport draws a sample of the field. Export bounds the clipped field at the requested accuracy before writing STL. The `import-features` scenario replays the certified steps over MCP.
 
 Selecting the import shows the record. Each gap has its answer, its approved limit and its vertex movement, and each repaired face has its attained distance from the source. These are separate numbers and are never added up: the limit is what was allowed, and the attained figure is what the repair proved over the whole face. They describe the import only, so later features are not covered. Output error belongs to each export, whose report is measured against the repaired body. No repair goes past a tenth of the nearest feature, even when approved.
 
@@ -121,7 +121,7 @@ The focused rollout check is `CARGO_BUILD_JOBS=3 cargo test -p soliddraft-app --
 
 ## Import report
 
-File > Import report lists every STEP, IGES and mesh file imported into the part: what each opened as and why. Certified solid and Certified solid, repaired identify checked results; Tolerant identifies local fits without a whole-body certificate. A surface body holds open faces with no volume or mass. A refusal is listed with its plain-words reason and no tree row. An unanswered review is not a refusal. Suppressed or rolled-back imports are not evaluated. Bodies from one file retain its repair evidence. A certified repaired face names its solid, so it counts for that body only; gap repairs belong to the file. A curved certified import also names the check it did not run: self-intersection is not verified on curved faces or edges. Show in tree selects an import, and Replace file reviews a new source for it.
+File > Import report lists every STEP, IGES and mesh file imported into the part: what each opened as and why. Solid and Solid, repaired identify exact results; Tolerant identifies local fits within local tolerances. A surface body holds open faces with no volume or mass. A refusal is listed with its plain-words reason and no tree row. An unanswered review is not a refusal. Suppressed or rolled-back imports are not evaluated. Bodies from one file retain its repair evidence. A certified repaired face names its solid, so it counts for that body only; gap repairs belong to the file. Show in tree selects an import, and Replace file reviews a new source for it.
 
 The report opens only when asked for. A tolerant or repaired import, or a refusal, produces a notice above the status bar with a link to the report. A certified import without repairs says only that it was imported. A refusal closes the import dialog, since answering it again cannot help. A new import is fitted in the view, however small.
 
@@ -313,14 +313,17 @@ The `scan_workspace` application test drives reference review, cancellation,
 acceptance, a fitting refusal, both maps, fit acceptance, save/reopen, downstream
 editing and STEP export through the real application and renderer.
 
-## STEP proof reports
+## STEP precision reports
 
 Every STEP file written by the app or `soliddraft export` has two adjacent reports:
-`part.step.proof.txt` for reading and `part.step.proof.json` for tools. The suffix
-preserves the full filename, including `.stp`. Browser exports download all three
-files. A report write failure prevents publication of the new STEP file.
+`part.step.precision.txt` for reading and `part.step.precision.json` for tools. The
+suffix preserves the full filename, including `.stp`. Browser exports download all three
+files. A report write failure prevents publication of the new STEP file. Earlier versions
+named the reports `part.step.proof.txt` and `part.step.proof.json`;
+`soliddraft_exchange::proof::read_report` still reads those.
 
-The JSON format is `soliddraft-proof/1`. It records the STEP bytes' SHA-256, the
+The JSON format is `soliddraft-precision/1`; reports in the earlier
+`soliddraft-proof/1` format still read. It records the STEP bytes' SHA-256, the
 export deviation certificate, and each feature's name, id, model answer kind,
 model bound, independent display bound, and work used. Suppressed features and
 features below the rollback bar are inactive and contribute no geometry.

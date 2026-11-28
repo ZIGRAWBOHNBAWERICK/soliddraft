@@ -16,13 +16,13 @@ pub(super) fn refusal(code: &str) -> KernelError {
             "Loft profiles need matching closed regions and holes in the same order"
         }
         "loft.admissibility-unproven" => {
-            "Loft could not verify that these profiles form a solid without crossing or folding. Try simpler profiles or change their order"
+            "Loft could not form a solid from these profiles without crossing or folding. Try simpler profiles or change their order"
         }
         "loft.legacy-parameterization" => "This loft uses an older definition. Create the loft again",
         "application.work-limit" | "numbers.resource-limit" => {
             "Loft could not finish checking these profiles. Try fewer or simpler profiles"
         }
-        _ => "Loft could not build a checked solid from these profiles. Try simpler profiles or change their order",
+        _ => "Loft could not build a solid from these profiles. Try simpler profiles or change their order",
     };
     KernelError::InvalidInput(message.into())
 }

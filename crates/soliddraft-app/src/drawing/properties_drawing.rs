@@ -1011,7 +1011,9 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                 let current = sheet.format_overrides.get(key).cloned().unwrap_or_default();
                 let mut text = current.clone();
                 ui.horizontal(|ui| {
-                    let label = key[..1].to_uppercase() + &key[1..];
+                    // The checker's sign-off field, named for the person.
+                    let label =
+                        if key == "checked" { "Checker".to_owned() } else { key[..1].to_uppercase() + &key[1..] };
                     ui.add_sized(
                         vec2(68.0, 22.0),
                         egui::Label::new(egui::RichText::new(label).size(12.0).color(theme::muted())),

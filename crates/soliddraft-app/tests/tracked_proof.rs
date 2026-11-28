@@ -50,13 +50,13 @@ fn a_row_is_stale_until_the_edit_is_proved() {
     let r = row(&doc);
     assert_eq!(r["tracked"]["state"], "stale");
     assert_eq!(r["value"], 10.0);
-    assert!(r["tracked"]["reason"].as_str().unwrap().contains("pending"));
+    assert!(r["tracked"]["reason"].as_str().unwrap().contains("still building"));
     assert_eq!(r["tracked"]["check"]["state"], "unknown");
     let refused = doc.apply(Command::Track { name: "other".into(), source, check: None });
     // Release even if the assertion fails, so a failed test cannot hold a worker forever.
     kernel.rules.lock().unwrap().hold = None;
     kernel.changed.notify_all();
-    assert!(refused.unwrap_err().contains("pending"));
+    assert!(refused.unwrap_err().contains("still building"));
     settle(&mut doc);
     assert_eq!(row(&doc)["tracked"]["state"], "current");
     assert_eq!(row(&doc)["value"], 15.0);

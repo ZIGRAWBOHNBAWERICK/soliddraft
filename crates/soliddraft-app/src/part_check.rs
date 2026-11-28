@@ -85,7 +85,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             return;
         }
         ui.label("The boundary model and distance field build each solid step independently.");
-        ui.label("This checks construction coverage. Surface agreement and print accuracy are not checked here.");
+        ui.label("This report covers construction coverage only, not surface agreement or print accuracy.");
         match &inspection.result {
             None => {
                 ui.spinner();

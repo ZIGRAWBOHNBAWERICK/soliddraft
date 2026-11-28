@@ -60,7 +60,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "assembly_check_interference",
             "Check interference",
             Icon::Cad("interference"),
-            "Check each pair of parts for overlap volume, touching faces or a proven gap",
+            "Check each pair of parts for overlap volume, touching faces or a gap",
         )
         .agents(
             Agents::Mcp,
@@ -71,7 +71,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "assembly_check_clearance",
             "Check clearance",
             Icon::Cad("interference"),
-            "Prove which pairs of parts are at or under a clearance",
+            "Find which pairs of parts are at or under a clearance",
         )
         .agents(
             Agents::Mcp,

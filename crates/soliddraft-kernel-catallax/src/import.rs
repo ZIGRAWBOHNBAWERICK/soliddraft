@@ -50,17 +50,17 @@ fn step_refusal(error: catallax_import::ImportRefusal) -> KernelError {
         }
         ValidationFailed { detail, .. } if detail.contains("convex planar cover") || detail.contains("not be bounded") => {
             return KernelError::Unsupported(
-                "This STEP file needs a planar repair that cannot be verified yet. Try exporting it again.".into(),
+                "This STEP file needs a planar repair that SolidDraft cannot make yet. Try exporting it again.".into(),
             );
         }
         ValidationFailed { .. } | IncidenceGap { .. } | PlanarRepairNotVerified { .. } => {
-            "This STEP file could not be imported without an unverified repair.".into()
+            "This STEP file could not be imported without a repair SolidDraft cannot make.".into()
         }
         SelfIntersecting { faces, .. } => {
             format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
         }
         SelfIntersectionNotVerified { faces, .. } => {
-            format!("This STEP solid could not be checked for crossing faces at {} and {}.", faces[0], faces[1])
+            format!("SolidDraft could not tell whether this STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
         }
         ResourceLimit => TOO_COMPLEX.into(),
     };
@@ -110,11 +110,14 @@ fn refusal(format: ImportFormat, error: catallax_import::ImportRefusal) -> Kerne
             "This IGES file does not form a supported closed solid. Check that its faces and edges meet exactly.".into()
         }
         SelfIntersectionNotVerified { faces, .. } => {
-            format!("This IGES solid could not be checked for crossing faces at {} and {}.", faces[0], faces[1])
+            format!(
+                "SolidDraft could not tell whether this IGES solid crosses itself at faces {} and {}.",
+                faces[0], faces[1]
+            )
         }
         other => match step_refusal(other) {
             KernelError::InvalidInput(message) => message.replace("STEP", "IGES"),
-            _ => "This IGES repair cannot be verified. Decline the repair or correct the source file.".into(),
+            _ => "SolidDraft cannot make this IGES repair. Decline the repair or correct the source file.".into(),
         },
     };
     KernelError::InvalidInput(message)
@@ -223,8 +226,8 @@ pub(super) fn replace_file(request: &FileReplacementRequest<'_>) -> KernelResult
         let message = match refusal.code {
             "import.invalid-decision" => "Replacing this file needs repair answers, which file replacement cannot apply yet. Nothing was changed.",
             "numbers.operation-budget" | "application.work-limit" | "import.resource-limit" =>
-                "The new file could not be checked for replacement within the available work limit. Nothing was changed.",
-            _ => "The new file's geometry could not be verified for replacement. Nothing was changed.",
+                "The new file could not be matched for replacement within the available work limit. Nothing was changed.",
+            _ => "The new file's geometry could not be matched for replacement. Nothing was changed.",
         };
         KernelError::InvalidInput(message.into())
     })?;
@@ -252,8 +255,8 @@ pub(super) fn replace_file(request: &FileReplacementRequest<'_>) -> KernelResult
         match reason {
             UnresolvedReason::ChangedOrRemoved => "changed or removed",
             UnresolvedReason::AmbiguousGeometry => "the same face occurs more than once",
-            UnresolvedReason::UnverifiedMultiplicity => "uniqueness could not be verified",
-            UnresolvedReason::UnverifiedGeometry => "its geometry could not be verified",
+            UnresolvedReason::UnverifiedMultiplicity => "it may occur more than once",
+            UnresolvedReason::UnverifiedGeometry => "its geometry could not be matched",
         }
         .to_owned()
     };
@@ -516,7 +519,7 @@ fn checked_mesh(source: &[u8]) -> KernelResult<()> {
             "import.mesh-too-large" => "This mesh has more than 200,000 triangles. Reduce the triangle count before importing it as a solid.",
             "import.mesh-nonmanifold-edge" | "import.mesh-pinched-vertex" => "This mesh has edges or vertices shared by separate surfaces. Separate them before importing it as a solid.",
             "import.mesh-malformed" => "This file could not be read as an STL or OBJ mesh.",
-            _ => "This mesh could not be checked within the available work limit.",
+            _ => "This mesh could not be read within the available work limit.",
         }.into()))?;
     if mesh.lumps().len() != 1 {
         return Err(KernelError::InvalidInput("Import one closed mesh solid at a time.".into()));

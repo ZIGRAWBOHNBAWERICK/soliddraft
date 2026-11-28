@@ -2154,7 +2154,7 @@ fn export_sheet(state: &mut AppState, format: export::Format, path: Option<PathB
     });
     let Some(path) = path else { return };
     let path = if path.extension().is_none() { path.with_extension(format.extension()) } else { path };
-    let written = write_sheet(s, format, &path);
+    let written = s.commit_title_draft().and_then(|()| write_sheet(s, format, &path));
     match written {
         Ok(w) => {
             // The kernel fitted these curves or measured where they cut and hide: Q14
@@ -2196,7 +2196,7 @@ pub(crate) fn write_sheet(s: &mut DrawingSession, format: export::Format, path: 
 }
 
 /// The drawing as `format`, as [`write_sheet`] writes it, without writing it.
-pub(crate) fn sheet_bytes(s: &mut DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
+pub(crate) fn sheet_bytes(s: &DrawingSession, format: export::Format) -> Result<(Vec<u8>, SheetExport), String> {
     let prepared = prepare_sheets(s, matches!(format, export::Format::Pdf))?;
     let bytes = prepared.bytes(format)?;
     let mut report = prepared.report;
@@ -2226,8 +2226,7 @@ impl PreparedSheets {
     }
 }
 
-pub(crate) fn prepare_sheets(s: &mut DrawingSession, all_sheets: bool) -> Result<PreparedSheets, String> {
-    s.commit_title_draft()?;
+pub(crate) fn prepare_sheets(s: &DrawingSession, all_sheets: bool) -> Result<PreparedSheets, String> {
     if !all_sheets && s.doc.drawing.sheets.get(s.sheet).is_none() {
         return Err("The current sheet is no longer available; select a sheet before exporting".into());
     }
@@ -2282,7 +2281,9 @@ fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {
     });
     let Some(path) = path else { return };
     let kernel = state.doc.kernel().backend();
-    match save_session(s, &path, &format!("{} {}", kernel.name, kernel.version)) {
+    let saved =
+        s.commit_title_draft().and_then(|()| save_session(s, &path, &format!("{} {}", kernel.name, kernel.version)));
+    match saved {
         Ok((path, warning)) => {
             s.say(format!("Saved {}", path.display()));
             match warning {
@@ -2303,7 +2304,6 @@ pub(crate) fn save_session(
     path: &Path,
     kernel: &str,
 ) -> Result<(PathBuf, Option<String>), String> {
-    s.commit_title_draft()?;
     let path = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
     let previous_path = s.doc.path.clone();
     let previous_model = s.doc.drawing.model.clone();

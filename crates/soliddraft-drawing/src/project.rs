@@ -14,7 +14,7 @@
 //! sections are applied last, by clipping the line work with
 //! [`clip_path`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use kurbo::{BezPath, ParamCurve, PathSeg, Point};
 use serde::{Deserialize, Serialize};
@@ -1497,6 +1497,28 @@ pub struct CircleInfo {
     pub model_centre: Vec3,
     /// Radius in model millimetres.
     pub model_radius: f64,
+}
+
+pub fn match_saved_circle_sources(index: &PartIndex<'_>, geometry: &ViewGeometry, circles: &mut Vec<CircleInfo>) {
+    if circles.is_empty() {
+        return;
+    }
+    let saved: HashMap<_, _> = geometry
+        .curves
+        .iter()
+        .filter(|c| c.kind == CurveKind::Edge)
+        .filter_map(|c| {
+            let hint = c.source.kernel_hint?;
+            let Resolution::Found(Entity::Edge(edge)) = index.resolve(&c.source) else { return None };
+            Some(((edge.raw(), c.source.section_leg), hint))
+        })
+        .collect();
+    circles.retain_mut(|circle| {
+        let Some(hint) = circle.entity.kernel_hint else { return false };
+        let Some(saved_hint) = saved.get(&(hint, circle.entity.section_leg)) else { return false };
+        circle.entity.kernel_hint = Some(*saved_hint);
+        true
+    });
 }
 
 /// One view's projection: its line work, its transform and the circles it sees

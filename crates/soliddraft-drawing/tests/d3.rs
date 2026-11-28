@@ -616,6 +616,42 @@ fn unmarked_circular_hatch_boundaries_are_approximate_after_sampling() {
 }
 
 #[test]
+fn saved_curve_picking_uses_the_current_circle_on_its_own_leg() {
+    use soliddraft_drawing::measure::{CurveShape, shape_of_curve};
+    use soliddraft_drawing::project::CircleInfo;
+    use soliddraft_drawing::{CurveKind, Entity, Resolution};
+
+    let original = BoxKernel::new();
+    let size = Vec3::new(40.0, 30.0, 10.0);
+    let drawing = drawing(&box_part(&original, "block", size));
+    let mut saved = drawing.view(FRONT).unwrap().geometry.clone();
+    saved.curves.retain(|curve| curve.visible && curve.kind == CurveKind::Edge);
+    saved.curves.truncate(1);
+    let curve = &mut saved.curves[0];
+    curve.source.section_leg = 1;
+
+    let reopened = BoxKernel::new();
+    reopened.add("other part", Vec3::ZERO, size);
+    let part = box_part(&reopened, "block", size);
+    let index = PartIndex::build(&part).unwrap();
+    let Resolution::Found(Entity::Edge(edge)) = index.resolve(&curve.source) else { panic!("the edge still exists") };
+    assert_ne!(curve.source.kernel_hint, Some(edge.raw()));
+    let centre = Point2::new(12.0, 24.0);
+    let mut circles: Vec<_> = [0, 1]
+        .map(|leg| {
+            let mut entity = index.edge_ref(edge).unwrap();
+            entity.section_leg = leg;
+            CircleInfo { entity, centre, radius: 4.5, model_centre: Vec3::new(12.0, 24.0, 0.0), model_radius: 4.5 }
+        })
+        .into();
+    project::match_saved_circle_sources(&index, &saved, &mut circles);
+    let [circle] = circles.as_slice() else { panic!("only the saved leg supplies a circle") };
+    assert_eq!(circle.entity.section_leg, 1);
+    assert!(matches!(shape_of_curve(&saved.curves[0], &circles), CurveShape::Circle { centre: at, radius }
+        if at == centre && radius == 4.5));
+}
+
+#[test]
 fn dxf_marks_the_polygon_used_to_clip_a_circular_hatch() {
     let k = BoxKernel::new();
     let mut drawing = drawing(&box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0)));

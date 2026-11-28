@@ -39,7 +39,11 @@ fn circles(list: &[(P2, f64)]) -> Sketch {
 /// 24 mm boss 30 high with a 12 mm bore through, and four 9 mm holes at x 25 and 115,
 /// y 23 and 67.
 fn bracket() -> Document {
-    let mut doc = Document::new("Part1", std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
+    bracket_on(std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()))
+}
+
+fn bracket_on(kernel: std::sync::Arc<dyn soliddraft_kernel_api::Kernel>) -> Document {
+    let mut doc = Document::new("Part1", kernel);
     doc.name = "Bracket".into();
     let sketch = |doc: &mut Document, sketch: Sketch| -> u64 {
         let plane = SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 };
@@ -194,12 +198,20 @@ fn bracket_drawing(root: &std::path::Path) -> App {
     let _ = std::fs::remove_dir_all(root);
     std::fs::create_dir_all(root.join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(root.join("config")));
-    let doc = bracket();
+    new_drawing(bracket())
+}
+
+fn app_with_part(doc: Document) -> App {
     let mut app = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     app.run_steps(6);
+    app
+}
+
+fn new_drawing(doc: Document) -> App {
+    let mut app = app_with_part(doc);
     drawing(&mut app, DrawingAction::MakeDrawing);
     drawing(&mut app, DrawingAction::CreateDrawing);
     settle(&mut app);
@@ -1292,6 +1304,126 @@ fn hole_callouts_use_the_part_linked_to_the_drawing() {
 }
 
 #[test]
+fn reopened_drawing_picks_hole_rims_in_a_fresh_kernel() {
+    use soliddraft_app::drawing::part::PartContext;
+    use soliddraft_drawing::{Entity, PartIndex, Resolution, file};
+    use soliddraft_kernel_api::drawing::Curve3;
+    use soliddraft_kernel_catallax::CatallaxKernel;
+    use std::sync::Arc;
+
+    let root = std::env::temp_dir().join(format!("soliddraft-reopen-hole-rims-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(root.join("config")));
+    let part_path = root.join("Bracket.dwprt");
+    let drawing_path = root.join("Bracket.dwdrw");
+    let kernel = Arc::new(CatallaxKernel::new());
+    let previous_part = bracket_on(kernel.clone());
+    let mut part = bracket_on(kernel);
+    soliddraft_app::file::save(&mut part, &part_path).unwrap();
+    let mut app = new_drawing(part);
+    let top = view_named(&app, "Top view");
+    drawing(&mut app, DrawingAction::Save(Some(drawing_path.clone())));
+    drop(app);
+    drop(previous_part);
+
+    let (saved, _) = file::read(&drawing_path).unwrap();
+    let saved_top = &saved.view(top).unwrap().geometry;
+    let part = soliddraft_app::file::open(&part_path, Arc::new(CatallaxKernel::new()), None).unwrap();
+    let rim_matches = |curve: &Curve3| {
+        matches!(curve, Curve3::Circle { center, radius, .. }
+            if center.distance(Vec3::new(25.0, 23.0, 10.0)) < 1e-6 && (radius - 4.5).abs() < 1e-6)
+    };
+    let rim_edge = {
+        let ctx = PartContext::new(&part).unwrap();
+        let drawing_part = ctx.part();
+        let index = PartIndex::build(&drawing_part).unwrap();
+        let (saved_hint, edge) = saved_top
+            .curves
+            .iter()
+            .filter(|curve| curve.visible)
+            .find_map(|curve| {
+                let Resolution::Found(Entity::Edge(edge)) = index.resolve(&curve.source) else { return None };
+                index.edge_curve(edge).is_some_and(rim_matches).then_some((curve.source.kernel_hint, edge))
+            })
+            .expect("the saved view draws the near rim of the plate hole at (25, 23)");
+        assert_ne!(saved_hint, Some(edge.raw()), "the saved rim handle belongs to the original kernel");
+        edge
+    };
+    let mut app = app_with_part(part);
+    drawing(&mut app, DrawingAction::OpenFile(drawing_path));
+    settle(&mut app);
+    assert!(session(&app).doc.transforms.is_empty());
+
+    let rim = Vec3::new(20.5, 23.0, 10.0);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::HoleCallout));
+    click_model(&mut app, top, rim);
+    let callout = session(&app).selected_annotation().expect("a callout on the clicked rim");
+    let AnnotationKind::HoleCallout { text } = &callout.body else { panic!("a hole callout") };
+    assert!(text.starts_with('4') && text.ends_with("9 THRU"), "{text}");
+    let [anchor] = callout.anchors.as_slice() else { panic!("one hole anchor") };
+    let part = &app.state().state.doc;
+    let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else {
+        panic!("a durable model edge reference")
+    };
+    assert_eq!(part.model().resolve_edge(reference, part.model().body().unwrap()).unwrap(), rim_edge);
+
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::HoleTable));
+    click_model(&mut app, top, Vec3::new(119.5, 67.0, 10.0));
+    let at = session(&app).screen_of(Point2::new(25.0, 150.0));
+    click_at(&mut app, at);
+    let table = session(&app).sheet().tables.iter().find(|table| table.hole_view == Some(top)).expect("the hole table");
+    let holes: Vec<_> =
+        table.holes.iter().map(|hole| (hole.coordinates.u, hole.coordinates.v, hole.diameter)).collect();
+    assert_eq!(
+        holes,
+        [(25.0, 23.0, 9.0), (25.0, 67.0, 9.0), (70.0, 45.0, 12.0), (115.0, 23.0, 9.0), (115.0, 67.0, 9.0)]
+    );
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn drawing_tools_write_committed_titles_and_leave_the_native_draft() {
+    use serde_json::json;
+    use soliddraft_app::app_tools::AppTools;
+    use soliddraft_assistant::{Caller, tools::call_checked};
+    use soliddraft_drawing::file;
+
+    let root = std::env::temp_dir().join(format!("soliddraft-mcp-title-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let owner = session(&app).sheet().format_overrides["owner"].clone();
+    let draft = "Draft rig owner";
+    let depth = session(&app).doc.undo_depth();
+    drawing(&mut app, DrawingAction::SheetProperties);
+    app.get_by_label("Owner field").focus();
+    app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text(draft.into()));
+    app.run_steps(2);
+
+    let saved = root.join("mcp.dwdrw");
+    let svg = root.join("mcp.svg");
+    let caller = Caller::Mcp { client: "test".into() };
+    for (tool, path) in [("drawing_export_svg", &svg), ("drawing_save", &saved)] {
+        let output =
+            call_checked(&mut AppTools { state: &mut app.state_mut().state }, tool, json!({ "path": path }), &caller);
+        assert!(!output.is_error, "{}", output.content);
+        assert_eq!(session(&app).sheet().format_overrides["owner"], owner);
+        assert_eq!(session(&app).doc.undo_depth(), depth);
+    }
+    assert_eq!(file::read(&saved).unwrap().0.sheets[0].format_overrides["owner"], owner);
+    let printed = std::fs::read_to_string(svg).unwrap();
+    assert!(printed.contains(&format!(">{owner}</text>")));
+    assert!(!printed.contains(draft));
+
+    let native = root.join("native.dwdrw");
+    drawing(&mut app, DrawingAction::Save(Some(native.clone())));
+    assert_eq!(file::read(&native).unwrap().0.sheets[0].format_overrides["owner"], draft);
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn save_and_export_commit_focused_title_edits() {
     use soliddraft_drawing::{export::Format, file};
 
@@ -1306,13 +1438,16 @@ fn save_and_export_commit_focused_title_edits() {
         app.event(egui::Event::Text(value.into()));
         app.run_steps(2);
     };
+    // A new drawing already has an owner; the typed value is not in the drawing until it is committed.
+    let owner = session(&app).sheet().format_overrides["owner"].clone();
+    assert_ne!(owner, "Rig Shop");
     app.get_by_label("Owner field").focus();
     type_text(&mut app, "Rig Shop");
-    assert!(!session(&app).sheet().format_overrides.contains_key("owner"));
+    assert_eq!(session(&app).sheet().format_overrides["owner"], owner);
     drawing(&mut app, DrawingAction::Save(None));
     assert_eq!(file::read(&path).unwrap().0.sheets[0].format_overrides["owner"], "Rig Shop");
     drawing(&mut app, DrawingAction::Undo);
-    assert!(!session(&app).sheet().format_overrides.contains_key("owner"));
+    assert_eq!(session(&app).sheet().format_overrides["owner"], owner);
     drawing(&mut app, DrawingAction::Redo);
 
     app.get_by_label("Title from field").focus();

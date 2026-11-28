@@ -39,17 +39,18 @@ pub(super) fn with_part<R>(
 }
 
 pub(super) fn cache_picking(s: &mut DrawingSession, doc: &Document, view: ViewId) -> bool {
-    let current = s.model_is(doc.model().id())
-        && s.doc.drawing.view(view).is_some_and(|v| v.geometry.source_digest == super::part::digest(doc).as_str());
-    if !current {
+    let Some(saved) = s.doc.drawing.view(view) else { return false };
+    if !s.model_is(doc.model().id()) || saved.geometry.source_digest != super::part::digest(doc).as_str() {
         return false;
     }
     if s.doc.transforms.contains_key(&view) {
         return true;
     }
-    if let Ok(projected) =
-        with_part(doc, |part, index| derived::context(&s.doc.drawing, part, index, view).map(|ctx| ctx.projected))
-    {
+    if let Ok(projected) = with_part(doc, |part, index| {
+        let mut ctx = derived::context(&s.doc.drawing, part, index, view)?;
+        project::match_saved_circle_sources(index, &saved.geometry, &mut ctx.projected.circles);
+        Ok(ctx.projected)
+    }) {
         s.doc.remember(view, &projected);
         true
     } else {
@@ -113,7 +114,8 @@ pub(super) fn anchor_from_hit(
         return Some((view, anchor));
     }
     let model = measures && (broken || c.source.section_leg != 0);
-    if model && !cache_picking(s, doc, view) {
+    let current = measures && cache_picking(s, doc, view);
+    if model && !current {
         return None;
     }
     let v = s.sheet().view(view)?;

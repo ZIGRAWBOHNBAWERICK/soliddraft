@@ -110,8 +110,8 @@ fn rebuilding_keeps_the_position_and_style_of_a_moved_hosted_tolerance() {
     let placement = soliddraft_kernel_api::Point2::new(old.placement.u + 15.0, old.placement.v + 8.0);
     drawing(&mut app, DrawingAction::Command(Command::MoveAnnotation { annotation: old.id, to: placement }));
     let style = soliddraft_drawing::StyleOverrides { text_height: Some(4.0), ..Default::default() };
-    let session = app.state_mut().state.drawing.session.as_mut().unwrap();
-    session.doc.drawing.annotation_mut(old.id).unwrap().style = style.clone();
+    app.state_mut().state.drawing.session.as_mut().unwrap().doc.drawing.annotation_mut(old.id).unwrap().style =
+        style.clone();
     drawing(&mut app, DrawingAction::Rebuild);
     let drawing = &session(&app).doc.drawing;
     let bytes = file::to_bytes(drawing, &file::FileMeta::new("test", drawing.meta.units)).unwrap();

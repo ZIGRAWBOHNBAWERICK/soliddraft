@@ -1671,11 +1671,20 @@ impl ViewportRenderer {
             mesh.corners.iter().map(|v| TaggedVertex { position: v.position.to_array(), id: v.pick }).collect();
         let empty = [0u8; 32];
         let make = |label: &str, bytes: &[u8], usage| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: if bytes.is_empty() { &empty } else { bytes },
-                usage,
-            })
+            let contents = if bytes.is_empty() { &empty } else { bytes };
+            if cfg!(target_arch = "wasm32") {
+                // SwiftShader WebGPU can refuse mapped buffers during the extrusion preview.
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: contents.len() as u64,
+                    usage: usage | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                queue.write_buffer(&buffer, 0, contents);
+                buffer
+            } else {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage })
+            }
         };
         let uniform = make(
             "body",

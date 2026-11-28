@@ -1,0 +1,7 @@
+{
+  "name": "Create an extrusion in Chromium on SwiftShader WebGPU",
+  "script": "ci/browser-swiftshader-extrude.js",
+  "port": 8799,
+  "path": "client/",
+  "swiftshader_webgpu": true
+}

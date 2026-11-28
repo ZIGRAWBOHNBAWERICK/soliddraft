@@ -82,10 +82,11 @@ fn model_curve<'a>(
     Some((curve, unfolded))
 }
 
-fn resolve_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &Anchor) -> Option<Vec3> {
+pub(crate) fn resolve_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &Anchor) -> Option<Vec3> {
     let (original, curve) = model_curve(index, xf, &anchor.entity)?;
     let geometry = crate::update::anchor_geometry(xf, anchor, Some(original), Some(&curve));
-    Some(anchor_point(&geometry, xf, Point2::default()))
+    let at = anchor_point(&geometry, xf, Point2::default());
+    (!matches!(anchor.attach, Attach::Centre | Attach::EdgeParameter { .. }) || xf.retains(at)).then_some(at)
 }
 
 /// Refines a curve pick to its model point and maps it back to the drawing.
@@ -113,10 +114,18 @@ fn interior_model_pick(index: &PartIndex, xf: &ViewTransform, drawn: &crate::Cur
 }
 
 /// Places a leader on the drawn curve, including a face-backed silhouette.
-pub fn retained_leader(drawn: &crate::Curve2, xf: Option<&ViewTransform>, at: Point2) -> Option<Anchor> {
+pub fn retained_leader(
+    drawn: &crate::Curve2,
+    xf: &ViewTransform,
+    index: Option<&PartIndex>,
+    at: Point2,
+) -> Option<Anchor> {
     let cached = crate::project::nearest_drawn_point(at, drawn.path.segments())?;
-    let attach =
-        xf.map_or(Attach::Mid, |xf| Attach::Point { at: xf.in_leg(drawn.source.section_leg).unproject(cached) });
+    let attach = if drawn.kind == crate::CurveKind::Edge {
+        Attach::EdgeParameter { t: interior_model_pick(index?, xf, drawn, cached)? }
+    } else {
+        Attach::Point { at: xf.in_leg(drawn.source.section_leg).unproject(cached) }
+    };
     Some(Anchor { entity: drawn.source.clone(), attach, cached })
 }
 
@@ -200,6 +209,14 @@ fn acute_angle(cos: f64) -> f64 {
 /// The projected ends of two straight model edges, in anchor order.
 pub(crate) fn projected_edge_ends(anchors: &[AnchorGeometry], xf: &ViewTransform) -> Option<[Point2; 4]> {
     Some(edge_ends(anchors, xf)?.map(|p| xf.point(p)))
+}
+
+/// The retained pieces of a projected centreline, from two edge endpoints per side.
+pub fn centreline_segments(points: [Point2; 4], gap: Option<crate::BreakGap>) -> impl Iterator<Item = [Point2; 2]> {
+    centreline(points.map(|p| gap.map_or(p, |gap| gap.unshift(p))))
+        .into_iter()
+        .flat_map(move |[a, b]| gap.map_or([[a, b], [b, b]], |gap| gap.trace_flat(a, b)))
+        .filter(|[a, b]| a != b)
 }
 
 /// The chamfer leg normal to the adjacent edge and the angle to that edge.

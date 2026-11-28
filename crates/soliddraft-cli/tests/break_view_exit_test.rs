@@ -170,22 +170,20 @@ fn half_section_of_a_symmetric_shaft() {
         let top = points.iter().map(|p| p.v).fold(f64::NEG_INFINITY, f64::max);
         near(bottom, inner, 0.001, "SVG inner wall");
         near(top, outer, 0.001, "SVG outer wall");
-        let wall: f64 = loops
+        let mut ys: Vec<_> = loops
             .iter()
-            .flat_map(|entity| entity.iter())
-            .map(|(external, ring)| {
-                let mut ys: Vec<_> = ring
-                    .iter()
+            .flatten()
+            .flat_map(|(_, ring)| {
+                ring.iter()
                     .zip(ring.iter().cycle().skip(1))
                     .filter(|(a, b)| (a.u <= u) != (b.u <= u))
                     .map(|(a, b)| a.v + (b.v - a.v) * (u - a.u) / (b.u - a.u))
-                    .collect();
-                ys.sort_by(f64::total_cmp);
-                let thickness: f64 = ys.chunks_exact(2).map(|pair| pair[1] - pair[0]).sum();
-                if *external { thickness } else { -thickness }
             })
-            .sum();
-        near(wall / scale, radius - 3.0, 1e-6, "DXF wall thickness");
+            .collect();
+        ys.sort_by(f64::total_cmp);
+        let [bottom, top] = ys.as_slice() else { panic!("one DXF wall at station {station}: {ys:?}") };
+        near(*bottom, inner, 1e-6, "DXF inner wall");
+        near(*top, outer, 1e-6, "DXF outer wall");
     }
 
     // The body grows 10 mm: the half section reflows with it.

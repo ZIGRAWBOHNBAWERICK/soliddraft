@@ -724,11 +724,7 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
             owner: Owner::Sheet,
         }));
         if field.symbol.as_deref() == Some("projection") {
-            let (centre, scale) = if placed.is_some() {
-                projection_symbol_fit([cell.0, cell.1, cell.2, cell.3])
-            } else {
-                (Point2::new(cell.0 + w / 2.0, cell.1 + TEMPLATE_SYMBOL_RISE), 1.0)
-            };
+            let (centre, scale) = projection_symbol_fit([cell.0, cell.1, cell.2, cell.3]);
             projection_symbol(sheet.projection, centre, scale, lines.thin, items);
             continue;
         }
@@ -762,8 +758,6 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
 const SYMBOL_SIZE: (f64, f64) = (17.0, 6.75);
 /// Space the caption takes at the top of a title cell, with a gap below it.
 const CAPTION_DEPTH: f64 = 3.2;
-/// Height of the full-size symbol's centre above the bottom of a template's cell.
-const TEMPLATE_SYMBOL_RISE: f64 = 3.2;
 /// Clearance between the projection symbol and its cell's edges.
 const SYMBOL_MARGIN: f64 = 0.3;
 /// The smallest fraction of full size the projection symbol may be drawn at.
@@ -1223,13 +1217,19 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
             }
         }
         AnnotationKind::Centreline => {
-            let ends = match anchors.as_slice() {
-                [a, b] => Some([*a, *b]),
-                [a, b, c, d] => crate::measure::centreline([*a, *b, *c, *d]),
-                _ => None,
+            let gap = sheet.view(a.view).and_then(|v| v.geometry.breaks.first().copied());
+            let role = if matches!(a.state, AnnotationState::Dangling { .. }) { role } else { Role::Centre };
+            let segments: Vec<_> = match a.anchors.as_slice() {
+                [a, b] => {
+                    gap.map_or([[a.cached, b.cached], [b.cached, b.cached]], |g| g.trace(a.cached, b.cached)).into()
+                }
+                [a, b, c, d] => {
+                    crate::measure::centreline_segments([a.cached, b.cached, c.cached, d.cached], gap).collect()
+                }
+                _ => Vec::new(),
             };
-            if let Some([start, end]) = ends {
-                let role = if matches!(a.state, AnnotationState::Dangling { .. }) { role } else { Role::Centre };
+            for [start, end] in segments.into_iter().filter(|[a, b]| a != b) {
+                let [start, end] = [start, end].map(|p| to_sheet(sheet, a.view, p));
                 push(items, line(start, end), Some(CENTRE_DASH.to_vec()), role);
             }
         }

@@ -732,6 +732,50 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
         assert_eq!(set.values, [90.0], "{kind:?}");
     }
 
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::SetViewScale { view: top, scale: ViewScale::Custom { factor: 1.0 } }),
+    );
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::SetViewBreaks {
+            view: top,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::X * 21.0,
+                to: Vec3::X * 29.0,
+                axis: AlignAxis::Horizontal,
+            }],
+        }),
+    );
+    {
+        use soliddraft_drawing::measure::{Pick, propose_model};
+        use soliddraft_kernel_api::drawing::Curve3;
+        let ctx = soliddraft_app::drawing::part::PartContext::new(&app.state().state.doc).unwrap();
+        let part = ctx.part();
+        let index = soliddraft_drawing::PartIndex::build(&part).unwrap();
+        let v = view(&app, top);
+        let xf = v.geometry.transform.unwrap();
+        let pick = |x, rim| {
+            let at = xf.point(Vec3::new(rim, 23.0, 10.0));
+            let curve = v.geometry.curves.iter().position(|c| {
+                c.visible && c.kind == CurveKind::Edge
+                    && c.source.kernel_hint.is_some_and(|id| {
+                        matches!(index.edge_curve(soliddraft_kernel_api::EdgeId::from_raw(id)),
+                            Some(Curve3::Circle { center, .. }) if (center.x - x).abs() < 1e-6 && (center.y - 23.0).abs() < 1e-6)
+                    })
+            }).expect("a retained hole rim");
+            Pick { view: top, curve, end: None, at: Some(at) }
+        };
+        let hidden = pick(25.0, 20.5);
+        let retained = pick(115.0, 119.5);
+        assert!(propose_model(&v, &[hidden, retained.clone()], &index, &xf).is_none());
+        let p = propose_model(&v, &[retained], &index, &xf).expect("the retained round still gives a diameter");
+        near(xf.unproject(p.centre).x, 115.0, 1e-6, "the retained centre");
+        assert!(session(&app).sheet().annotations.iter().any(|a| a.view == top
+            && matches!(&a.state, soliddraft_drawing::AnnotationState::Dangling { lost, .. } if lost == &[0])
+            && matches!(a.body, AnnotationKind::DimensionSet(_))));
+    }
+
     let broken = view(&app, front);
     let xf = broken.geometry.transform.unwrap();
     let silhouette = broken

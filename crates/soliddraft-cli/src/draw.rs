@@ -564,6 +564,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("off")).init();
     let result = if o.update.is_some() { update(&o) } else { create(&o) };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -868,13 +869,16 @@ fn update(o: &Options) -> Result<(), String> {
             for (id, end, at) in &o.reattach {
                 let id = AnnotationId(*id);
                 let index = PartIndex::build(part)?;
-                let ctx = derived::context(&drawing, part, &index, annotation(id)?.view)
-                    .inspect_err(|_| keep_rebuild = true)?;
-                let entity = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *at)
-                    .ok_or_else(|| DrawingError::BadRequest("No edge in the view is available at that point".into()))?
-                    .entity;
+                let annotation = annotation(id)?;
+                let ctx =
+                    derived::context(&drawing, part, &index, annotation.view).inspect_err(|_| keep_rebuild = true)?;
+                let picked = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *at)
+                    .ok_or_else(|| DrawingError::BadRequest("No edge in the view is available at that point".into()))?;
+                let attach = (!ctx.xf.breaks.is_empty()
+                    && annotation.anchors.get(*end).is_some_and(|a| a.attach != soliddraft_drawing::Attach::Centre))
+                .then_some(picked.attach);
                 requested.push((
-                    Command::Reattach { annotation: id, end: *end, entity, attach: None },
+                    Command::Reattach { annotation: id, end: *end, entity: picked.entity, attach },
                     format!("reattached end {end} of {id}"),
                 ));
             }

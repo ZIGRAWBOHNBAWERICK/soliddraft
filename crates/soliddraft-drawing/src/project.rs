@@ -168,6 +168,10 @@ impl ViewTransform {
         self.leg_turn(leg).map_or(p, |turn| turn.point(p))
     }
 
+    pub(crate) fn retains(&self, p: Vec3) -> bool {
+        !self.breaks.hides(p.dot(self.breaks.axis(&self.frame)))
+    }
+
     /// A transform with no breaks.
     pub fn new(frame: ViewFrame, scale: f64, centre: Point2) -> ViewTransform {
         ViewTransform { frame, scale, centre, breaks: Breaks::default(), aligned_turn: None }
@@ -833,7 +837,7 @@ fn half_section(
         return Err(DrawingError::BadRequest("Both symmetry axis points must lie in the same cutting plane".into()));
     }
     let flat = ctx.xf.unbroken();
-    let boundary = half_boundary(&flat, half)?;
+    let boundary = half_boundary(&flat, half, &ctx.curves)?;
     let mut spec = with_display(ctx.spec(), display);
     spec.preview = part.preview;
     let section = section_or_mesh(part, &spec, half.axis[0], None)?;
@@ -860,7 +864,7 @@ fn half_section(
 
 /// The half-plane a half section cuts away, in view millimetres: a polygon reaching far
 /// past any view on the cut side of the symmetry line.
-fn half_boundary(xf: &ViewTransform, half: &HalfSection) -> Result<Boundary, DrawingError> {
+fn half_boundary(xf: &ViewTransform, half: &HalfSection, curves: &ViewCurves) -> Result<Boundary, DrawingError> {
     const FAR: f64 = 1e5;
     let (a, b) = (xf.precise_point(half.axis[0]), xf.precise_point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
@@ -873,6 +877,19 @@ fn half_boundary(xf: &ViewTransform, half: &HalfSection) -> Result<Boundary, Dra
     let (du, dv) = (du / len, dv / len);
     let side = if half.flip { -1.0 } else { 1.0 };
     let (nu, nv) = (-dv * side, du * side);
+    let across = kurbo::Affine::new([du, nu, dv, nv, 0.0, -(a.u * nu + a.v * nv)]);
+    let (lo, hi) = curves.curves.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
+        let mut path = path_of(&c.curve, xf);
+        path.apply_affine(across);
+        if path.elements().len() < 2 {
+            return (lo, hi);
+        }
+        let b = kurbo::Shape::bounding_box(&path);
+        (lo.min(b.y0), hi.max(b.y1))
+    });
+    if lo >= -1e-6 || hi <= 1e-6 {
+        return Err(DrawingError::BadRequest("The symmetry line must divide the projected part".into()));
+    }
     let at = |along: f64, across: f64| Point2::new(a.u + du * along + nu * across, a.v + dv * along + nv * across);
     Ok(Boundary::Polygon { points: vec![at(-FAR, 0.0), at(FAR, 0.0), at(FAR, FAR), at(-FAR, FAR)] })
 }
@@ -1573,7 +1590,7 @@ fn project_curves(
         if !c.approximate
             && let Curve3::Circle { center, normal, radius } = geometry
             && normal.cross(xf.frame.direction).length() < 1e-6
-            && !xf.breaks.hides(center.dot(xf.breaks.axis(&xf.frame)))
+            && xf.retains(*center)
             && matches!(c.source, CurveSource::Edge(_))
             && !circles.iter().any(|k| k.entity.same_projected_entity(&source))
         {

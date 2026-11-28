@@ -571,33 +571,38 @@ impl BreakGap {
     }
 
     pub(crate) fn trace(self, a: Point2, b: Point2) -> [[Point2; 2]; 2] {
-        let (a0, b0) = (self.unshift(a), self.unshift(b));
-        let (start, end) = (self.along(a0), self.along(b0));
-        let far = self.at + self.omitted_mm.unwrap_or(self.gap);
-        let (first, last) = if start <= end { (self.at, far) } else { (far, self.at) };
-        let at = |station: f64, shift: f64| {
-            let t = ((station - start) / (end - start)).clamp(0.0, 1.0);
-            let p = Point2::new(a0.u + (b0.u - a0.u) * t, a0.v + (b0.v - a0.v) * t);
-            if t == 0.0 {
-                a
-            } else if t == 1.0 {
-                b
-            } else if self.axis == AlignAxis::Vertical {
-                Point2::new(p.u, p.v - shift)
+        self.trace_flat(self.unshift(a), self.unshift(b))
+    }
+
+    pub(crate) fn trace_flat(self, a: Point2, b: Point2) -> [[Point2; 2]; 2] {
+        let (start, end) = (self.along(a), self.along(b));
+        let omitted = self.omitted_mm.unwrap_or(self.gap);
+        let far = self.at + omitted;
+        let shift = |p: Point2| {
+            let offset = omitted - self.gap;
+            if self.axis == AlignAxis::Vertical {
+                Point2::new(p.u, p.v - offset)
             } else {
-                Point2::new(p.u - shift, p.v)
+                Point2::new(p.u - offset, p.v)
             }
         };
-        if start == end && self.contains(a) {
-            return [[a, a], [b, b]];
-        }
         if start == end {
-            return [[a, b], [b, b]];
+            return if start <= self.at {
+                [[a, b], [b, b]]
+            } else if start >= far {
+                [[shift(a), shift(b)], [b, b]]
+            } else {
+                [[a, a], [b, b]]
+            };
         }
-        [
-            [a, at(first, first - self.at - if first == far { self.gap } else { 0.0 })],
-            [at(last, last - self.at - if last == far { self.gap } else { 0.0 }), b],
-        ]
+        let at = |t: f64| Point2::new(a.u + (b.u - a.u) * t, a.v + (b.v - a.v) * t);
+        let first = ((self.at - start) / (end - start)).clamp(0.0, 1.0);
+        let last = ((far - start) / (end - start)).clamp(0.0, 1.0);
+        if start < end {
+            [[a, at(first)], [shift(at(last)), shift(b)]]
+        } else {
+            [[shift(a), shift(at(last))], [at(first), b]]
+        }
     }
 
     pub(crate) fn contains(self, p: Point2) -> bool {

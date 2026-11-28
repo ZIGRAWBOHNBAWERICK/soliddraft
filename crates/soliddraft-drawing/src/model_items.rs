@@ -373,6 +373,9 @@ fn plan_diameter(
                 // Visible first, then the earlier view, then the circle nearest the eye.
                 let Some(visible) = v.edge_visibility(id, leg) else { continue };
                 let c = v.xf.point_on_leg(leg, c);
+                if !v.xf.retains(c) {
+                    continue;
+                }
                 let key = (visible, -(order as i32), v.xf.frame.depth(c));
                 let better = match &best {
                     None => true,

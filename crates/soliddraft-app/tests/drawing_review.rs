@@ -433,6 +433,56 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     let AnnotationKind::Dimension(dimension) = &annotation.body else { panic!("the rebuilt bore radius") };
     assert_eq!(dimension.kind, soliddraft_drawing::DimensionKind::Radius);
     assert_eq!(dimension.value, DimValue::Measured { value: 4.0 });
+    use soliddraft_kernel_api::pmi::{Anchor, At, PmiItem};
+    let hole = |x| {
+        topology
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface == SurfaceKind::Cylinder
+                    && (face.centroid.x - x).abs() < 1e-6
+                    && (face.centroid.y - 12.0).abs() < 1e-6
+            })
+            .unwrap()
+            .id
+    };
+    let faces = [hole(10.0), hole(50.0)];
+    let ends = faces.map(|face| candidate_doc.model().face_ref(face).unwrap());
+    let name = "Hole spacing";
+    for (i, (from_at, to_at, expected, value)) in [
+        (At::Feature, At::Feature, [10.0, 50.0], 40.0),
+        (At::Inner, At::Feature, [12.0, 50.0], 38.0),
+        (At::Inner, At::Outer, [12.0, 52.0], 40.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let item = PmiItem {
+            id: name.into(),
+            kind: PmiKind::Location {
+                from: Anchor { feature: vec![ends[0].clone()], at: from_at },
+                to: Anchor { feature: vec![ends[1].clone()], at: to_at },
+                tolerance: Tolerance::None,
+                nominal: None,
+            },
+        };
+        candidate_doc.put_pmi(item, (i != 0).then(|| name.into())).unwrap();
+        let part = soliddraft_app::drawing::part::PartContext::new(&candidate_doc).unwrap();
+        soliddraft_drawing::update_from_model(&mut changed, &part.part()).unwrap();
+        let target = soliddraft_drawing::review::place_of_item(&changed, name).unwrap();
+        let annotation = changed.annotation(target.annotation).unwrap();
+        let AnnotationKind::Dimension(dimension) = &annotation.body else { panic!("hole spacing") };
+        assert_eq!(dimension.value, DimValue::Measured { value });
+        let xf = changed.view(annotation.view).unwrap().geometry.transform.unwrap();
+        for ((anchor, x), face) in annotation.anchors.iter().zip(expected).zip(faces) {
+            let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else {
+                panic!("a model edge")
+            };
+            let rim = candidate_doc.model().resolve_edge(reference, body).unwrap();
+            assert!(topology.face(face).unwrap().edges.contains(&rim));
+            assert!((xf.unproject(anchor.cached).x - x).abs() < 1e-5);
+        }
+    }
     for (path, before) in [&baseline, &candidate, &drawing_path].into_iter().zip(&sources) {
         assert_eq!(&std::fs::read(path).unwrap(), before, "{} is as it was", path.display());
     }

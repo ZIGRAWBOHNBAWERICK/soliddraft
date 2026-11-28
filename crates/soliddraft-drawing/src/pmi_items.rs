@@ -96,7 +96,42 @@ struct Body<'a> {
     tol: f64,
 }
 
-impl Body<'_> {
+impl<'a> Body<'a> {
+    fn new(part: &Part, index: &'a PartIndex<'a>) -> Result<Self, DrawingError> {
+        let topology = part.geometry.topology()?;
+        let size = topology.faces.iter().fold(1.0_f64, |size, face| size.max(face.bbox.max.distance(face.bbox.min)));
+        let axes = part.geometry.face_carriers()?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
+        Ok(Self { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), axes, index, tol: 1e-6 * size })
+    }
+
+    fn end(&self, anchor: &soliddraft_kernel_api::pmi::Anchor<FaceId>) -> Result<End, String> {
+        let shape = self.feature(&anchor.feature)?;
+        let pair = anchor.feature.get(1).and_then(|face| self.face(*face));
+        Ok(End { shape, faces: anchor.feature.clone(), at: anchor.at, pair })
+    }
+
+    fn location_matches(
+        &self,
+        annotation: &Annotation,
+        ctx: &ViewContext,
+        from: &soliddraft_kernel_api::pmi::Anchor<FaceId>,
+        to: &soliddraft_kernel_api::pmi::Anchor<FaceId>,
+    ) -> Option<bool> {
+        let [first, second] = annotation.anchors.as_slice() else { return Some(false) };
+        let from = self.end(from).ok()?;
+        let to = self.end(to).ok()?;
+        let (direction, towards) = linear_axis(&from, &to)?;
+        let matches = |anchor: &Anchor, end: &End, sign| {
+            let leg = anchor.entity.section_leg;
+            let view = PmiView { ctx, id: ctx.id, xf: ctx.xf.in_leg(leg), leg };
+            let (_, _, wanted, _, _) = self.end_anchor(end, &view, direction, sign, None)?;
+            let axis = unit(view.xf.vector(direction));
+            let delta = (wanted.u - anchor.cached.u) * axis.u + (wanted.v - anchor.cached.v) * axis.v;
+            Some(delta.abs() <= 1e-6 * view.xf.scale + 1e-6)
+        };
+        Some(matches(first, &from, towards)? && matches(second, &to, -towards)?)
+    }
+
     /// The shape of a face: a plane, or a cylinder read off a round edge of the face.
     fn face(&self, face: FaceId) -> Option<Shape> {
         let info = self.faces.get(&face)?;
@@ -122,7 +157,13 @@ impl Body<'_> {
     /// annotation attaches to stand at its centre, that centre, and whether the view
     /// shows the edge as a visible line. Visible first, then nearest the eye. A round
     /// edge is any edge of the feature's faces but the straight ones along the axis.
-    fn round_edge(&self, feature: &[FaceId], view: &PmiView<'_>, axis: Vec3) -> Option<(EdgeId, Attach, Vec3, bool)> {
+    fn round_edge(
+        &self,
+        feature: &[FaceId],
+        view: &PmiView<'_>,
+        axis: Vec3,
+        needs_centre: bool,
+    ) -> Option<(EdgeId, Attach, Vec3, bool)> {
         let mut best: Option<((bool, f64), EdgeId, Attach, Vec3)> = None;
         for face in feature {
             for edge in &self.faces.get(face)?.edges {
@@ -136,6 +177,9 @@ impl Body<'_> {
                         (Attach::Point { at: centre }, centre)
                     }
                 };
+                if needs_centre && !view.xf.retains(centre) {
+                    continue;
+                }
                 let Some(visible) = view.ctx.edge_visibility(*edge, view.leg) else { continue };
                 let key = (visible, view.xf.frame.depth(centre));
                 if best.as_ref().is_none_or(|(k, ..)| (key.0, key.1) > (k.0, k.1 + self.tol)) {
@@ -144,6 +188,69 @@ impl Body<'_> {
             }
         }
         best.map(|(key, edge, attach, centre)| (edge, attach, centre, key.0))
+    }
+
+    /// The anchor of one end of a distance in a view: the edge, where on it, the point
+    /// in the view, whether the view shows the edge as a visible line and whether it
+    /// sees a round end face on. `lean` is the direction across the measuring one that
+    /// the dimension line lies in; with it a flat end is taken at its near end, so
+    /// extension lines start where the dimension is. Without it, at its middle.
+    fn end_anchor(
+        &self,
+        end: &End,
+        view: &PmiView<'_>,
+        direction: Vec3,
+        towards: f64,
+        lean: Option<Point2>,
+    ) -> Option<(EdgeId, Attach, Point2, bool, bool)> {
+        match end.shape {
+            Shape::Plane { point, normal } => {
+                let (edge, visible) = view.plane_edge(self, &end.faces, point, normal)?;
+                let curve = self.index.edge_curve(edge)?;
+                let near = match lean {
+                    None => Attach::Mid,
+                    Some(lean) => match curve {
+                        Curve3::Line { .. } => {
+                            let along = |p: Vec3| {
+                                let q = view.xf.point(p);
+                                q.u * lean.u + q.v * lean.v
+                            };
+                            if along(curve.end()) > along(curve.start()) { Attach::End } else { Attach::Start }
+                        }
+                        _ => Attach::Max,
+                    },
+                };
+                let across = lean.unwrap_or(Point2::new(0.0, 1.0));
+                let at_near = anchor_point(
+                    &AnchorGeometry { curve: Some(curve), point: Vec3::ZERO, attach: near },
+                    &view.xf,
+                    across,
+                );
+                let (attach, model) = match (end.at, end.pair) {
+                    (At::Middle, Some(Shape::Plane { point: other, .. })) => {
+                        let at = at_near + normal * ((other - point).dot(normal) / 2.0);
+                        (Attach::Point { at }, at)
+                    }
+                    _ => (near, at_near),
+                };
+                Some((edge, attach, view.xf.point(model), visible, false))
+            }
+            Shape::Round { axis, radius, .. } => {
+                let needs_centre = !matches!(end.at, At::Inner | At::Outer);
+                let (edge, centred, on_axis, visible) = self.round_edge(&end.faces, view, axis, needs_centre)?;
+                let attach = match end.at {
+                    At::Inner => Attach::Point { at: on_axis + direction * (radius * towards) },
+                    At::Outer => Attach::Point { at: on_axis - direction * (radius * towards) },
+                    _ => centred,
+                };
+                let model = match attach {
+                    Attach::Point { at } => at,
+                    _ => on_axis,
+                };
+                let face_on = axis.dot(view.xf.frame.direction).abs() > 1.0 - 1e-6;
+                view.xf.retains(model).then(|| (edge, attach, view.xf.point(model), visible, face_on))
+            }
+        }
     }
 }
 
@@ -246,6 +353,23 @@ fn unit(p: Point2) -> Point2 {
     if length > 1e-12 { Point2::new(p.u / length, p.v / length) } else { Point2::new(0.0, 1.0) }
 }
 
+fn linear_axis(from: &End, to: &End) -> Option<(Vec3, f64)> {
+    let position = |end: &End| match end.shape {
+        Shape::Plane { point, .. } => point,
+        Shape::Round { centre, .. } => centre,
+    };
+    let direction = match (from.shape, to.shape) {
+        (Shape::Plane { normal, .. }, _) | (_, Shape::Plane { normal, .. }) => normal,
+        (Shape::Round { axis, .. }, Shape::Round { .. }) => {
+            let between = position(to) - position(from);
+            (between - axis * between.dot(axis)).normalized()?
+        }
+    };
+    // From the first end towards the second.
+    let towards = if (position(to) - position(from)).dot(direction) >= 0.0 { 1.0 } else { -1.0 };
+    Some((direction, towards))
+}
+
 impl<'a> Planner<'a> {
     /// The diagonals of a view in the order callouts take them: those that point at
     /// no stack of dimensions first, and of those the right-hand ones, so a frame can
@@ -289,7 +413,7 @@ impl<'a> Planner<'a> {
             if axis.dot(view.xf.frame.direction).abs() < 1.0 - 1e-6 {
                 continue;
             }
-            let Some((_, _, _, visible)) = self.body.round_edge(first, view, axis) else { continue };
+            let Some((_, _, _, visible)) = self.body.round_edge(first, view, axis, true) else { continue };
             let key = (visible, -(order as i32));
             if best.as_ref().is_none_or(|(k, _)| key > *k) {
                 best = Some((key, *view));
@@ -299,7 +423,7 @@ impl<'a> Planner<'a> {
         let lead = self.diagonals(view.id)[0];
         let mut chosen: Option<(f64, EdgeId, Attach, Point2)> = None;
         for feature in features {
-            let Some((edge, attach, centre, _)) = self.body.round_edge(feature, &view, axis) else { continue };
+            let Some((edge, attach, centre, _)) = self.body.round_edge(feature, &view, axis, true) else { continue };
             let at = view.xf.point(centre);
             let out = at.u * f64::from(lead.0) + at.v * f64::from(lead.1);
             if chosen.as_ref().is_none_or(|(o, ..)| out > *o + 1e-9) {
@@ -372,68 +496,6 @@ impl<'a> Planner<'a> {
         Ok((view, edge, Attach::Point { at }, on, out))
     }
 
-    /// The anchor of one end of a distance in a view: the edge, where on it, the point
-    /// in the view, whether the view shows the edge as a visible line and whether it
-    /// sees a round end face on. `lean` is the direction across the measuring one that
-    /// the dimension line lies in; with it a flat end is taken at its near end, so
-    /// extension lines start where the dimension is. Without it, at its middle.
-    fn end_anchor(
-        &self,
-        end: &End,
-        view: &PmiView<'_>,
-        direction: Vec3,
-        towards: f64,
-        lean: Option<Point2>,
-    ) -> Option<(EdgeId, Attach, Point2, bool, bool)> {
-        match end.shape {
-            Shape::Plane { point, normal } => {
-                let (edge, visible) = view.plane_edge(&self.body, &end.faces, point, normal)?;
-                let curve = self.body.index.edge_curve(edge)?;
-                let near = match lean {
-                    None => Attach::Mid,
-                    Some(lean) => match curve {
-                        Curve3::Line { .. } => {
-                            let along = |p: Vec3| {
-                                let q = view.xf.point(p);
-                                q.u * lean.u + q.v * lean.v
-                            };
-                            if along(curve.end()) > along(curve.start()) { Attach::End } else { Attach::Start }
-                        }
-                        _ => Attach::Max,
-                    },
-                };
-                let across = lean.unwrap_or(Point2::new(0.0, 1.0));
-                let at_near = anchor_point(
-                    &AnchorGeometry { curve: Some(curve), point: Vec3::ZERO, attach: near },
-                    &view.xf,
-                    across,
-                );
-                let (attach, model) = match (end.at, end.pair) {
-                    (At::Middle, Some(Shape::Plane { point: other, .. })) => {
-                        let at = at_near + normal * ((other - point).dot(normal) / 2.0);
-                        (Attach::Point { at }, at)
-                    }
-                    _ => (near, at_near),
-                };
-                Some((edge, attach, view.xf.point(model), visible, false))
-            }
-            Shape::Round { axis, radius, .. } => {
-                let (edge, centred, on_axis, visible) = self.body.round_edge(&end.faces, view, axis)?;
-                let attach = match end.at {
-                    At::Inner => Attach::Point { at: on_axis + direction * (radius * towards) },
-                    At::Outer => Attach::Point { at: on_axis - direction * (radius * towards) },
-                    _ => centred,
-                };
-                let model = match attach {
-                    Attach::Point { at } => at,
-                    _ => on_axis,
-                };
-                let face_on = axis.dot(view.xf.frame.direction).abs() > 1.0 - 1e-6;
-                Some((edge, attach, view.xf.point(model), visible, face_on))
-            }
-        }
-    }
-
     /// A linear dimension between two ends.
     /// `datum` is the letter of the datum a basic distance is measured from: all the
     /// basic distances from one datum in a view go on one side, the one that leads away
@@ -447,19 +509,7 @@ impl<'a> Planner<'a> {
         value: f64,
         tolerance: Tolerance,
     ) -> Result<(), String> {
-        let position = |end: &End| match end.shape {
-            Shape::Plane { point, .. } => point,
-            Shape::Round { centre, .. } => centre,
-        };
-        let direction = match (from.shape, to.shape) {
-            (Shape::Plane { normal, .. }, _) | (_, Shape::Plane { normal, .. }) => normal,
-            (Shape::Round { axis, .. }, Shape::Round { .. }) => {
-                let between = position(to) - position(from);
-                (between - axis * between.dot(axis)).normalized().ok_or("its two ends share an axis")?
-            }
-        };
-        // From the first end towards the second.
-        let towards = if (position(to) - position(from)).dot(direction) >= 0.0 { 1.0 } else { -1.0 };
+        let (direction, towards) = linear_axis(from, to).ok_or("its two ends share an axis")?;
         let mut best: Option<(i32, Plan)> = None;
         for (order, view) in self.views.iter().enumerate() {
             let frame = &view.xf.frame;
@@ -474,8 +524,8 @@ impl<'a> Planner<'a> {
                 continue;
             };
             let (Some(a), Some(b)) = (
-                self.end_anchor(from, view, direction, towards, None),
-                self.end_anchor(to, view, direction, -towards, None),
+                self.body.end_anchor(from, view, direction, towards, None),
+                self.body.end_anchor(to, view, direction, -towards, None),
             ) else {
                 continue;
             };
@@ -496,8 +546,8 @@ impl<'a> Planner<'a> {
             };
             let across = if vertical { Point2::new(f64::from(side), 0.0) } else { Point2::new(0.0, f64::from(side)) };
             let (Some(a), Some(b)) = (
-                self.end_anchor(from, view, direction, towards, Some(across)),
-                self.end_anchor(to, view, direction, -towards, Some(across)),
+                self.body.end_anchor(from, view, direction, towards, Some(across)),
+                self.body.end_anchor(to, view, direction, -towards, Some(across)),
             ) else {
                 continue;
             };
@@ -773,12 +823,7 @@ impl<'a> Planner<'a> {
                 });
             }
             PmiKind::Location { from, to, tolerance, .. } => {
-                let end = |anchor: &soliddraft_kernel_api::pmi::Anchor<FaceId>| -> Result<End, String> {
-                    let shape = self.body.feature(&anchor.feature)?;
-                    let pair = anchor.feature.get(1).and_then(|face| self.body.face(*face));
-                    Ok(End { shape, faces: anchor.feature.clone(), at: anchor.at, pair })
-                };
-                let (from, to) = (end(from)?, end(to)?);
+                let (from, to) = (self.body.end(from)?, self.body.end(to)?);
                 let value = row.measured.first().copied().ok_or("the part could not measure it")?;
                 self.linear(None, source, &from, &to, value, *tolerance)?;
             }
@@ -1274,6 +1319,21 @@ pub(crate) fn authored_angle(annotation: &Annotation, part: &Part) -> Option<f64
     }
 }
 
+pub(crate) fn repaired_location_matches(
+    annotation: &Annotation,
+    ctx: &ViewContext,
+    part: &Part,
+    index: &PartIndex,
+) -> Result<bool, DrawingError> {
+    let Some(source @ PmiSource::Item { .. }) = &annotation.source else { return Ok(true) };
+    let Some(PmiKind::Location { from, to, .. }) =
+        row_of(source, &part.requirements.rows).and_then(|row| row.on_body.as_ref()).map(|item| &item.kind)
+    else {
+        return Ok(true);
+    };
+    Ok(Body::new(part, index)?.location_matches(annotation, ctx, from, to) == Some(true))
+}
+
 fn datum_target_body<F>(target: &soliddraft_kernel_api::pmi::DatumTarget<F>) -> AnnotationKind {
     let extent = match &target.kind {
         TargetKind::Point => String::new(),
@@ -1343,11 +1403,18 @@ pub(crate) fn refresh(
     part: &Part,
     index: &PartIndex,
     refresh_view: impl Fn(ViewId) -> bool,
-    redraw: bool,
-) {
+    contexts: Option<&crate::project::Contexts>,
+) -> Result<(), DrawingError> {
+    let redraw = contexts.is_some();
     let all = &part.requirements.rows;
     let rows: BTreeMap<&str, &PmiRow> =
         all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
+    let body = if redraw && rows.values().any(|row| row.applies() && matches!(row.item.kind, PmiKind::Location { .. }))
+    {
+        Some(Body::new(part, index)?)
+    } else {
+        None
+    };
     let notes = &part.requirements.notes.notes;
     let mut thread_notes = BTreeMap::new();
     if redraw {
@@ -1392,6 +1459,14 @@ pub(crate) fn refresh(
                     })
                     .collect();
                 if entities.iter().any(Option::is_none) || !anchors_on_item(annotation, &entities, part, index) {
+                    return false;
+                }
+                if let Some(body) = &body
+                    && let Some(ctx) = contexts.and_then(|contexts| contexts.get(&annotation.view))
+                    && let Some(PmiKind::Location { from, to, .. }) =
+                        rows[item.as_str()].on_body.as_ref().map(|item| &item.kind)
+                    && body.location_matches(annotation, ctx, from, to) != Some(true)
+                {
                     return false;
                 }
             }
@@ -1440,6 +1515,7 @@ pub(crate) fn refresh(
             }
         });
     }
+    Ok(())
 }
 
 /// Copies what the part states about an item into the annotation that shows it.
@@ -1525,8 +1601,6 @@ pub fn import(
     if rows.is_empty() {
         return Ok(report);
     }
-    let topology = part.geometry.topology()?;
-    let size = topology.faces.iter().fold(1.0_f64, |size, face| size.max(face.bbox.max.distance(face.bbox.min)));
     let template = drawing.sheets.get(sheet).map(|s| s.template.as_str()).unwrap_or("");
     let style = crate::library::template(template).style_file();
     // Items already on the drawing stay where they are and are not drawn twice.
@@ -1542,7 +1616,6 @@ pub fn import(
         .filter(|v| !v.pictorial)
         .filter(|v| drawing.view(v.id).is_some_and(|view| !matches!(view.kind, crate::ViewKind::Section { .. })))
         .collect();
-    let axes = part.geometry.face_carriers()?.into_iter().filter_map(|c| Some((c.id, c.axis?))).collect();
     // The way out of the group of views, for each view: away from the middle of the
     // others.
     let places: Vec<(ViewId, Point2)> =
@@ -1566,7 +1639,7 @@ pub fn import(
         })
         .collect();
     let mut planner = Planner {
-        body: Body { faces: topology.faces.into_iter().map(|f| (f.id, f)).collect(), axes, index, tol: 1e-6 * size },
+        body: Body::new(part, index)?,
         bbox: candidates.iter().filter_map(|v| Some((v.id, drawing.view(v.id)?.geometry.bbox))).collect(),
         views: candidates
             .iter()

@@ -1152,6 +1152,19 @@ fn a_diagonal_half_section_clips_both_sides_of_a_break_in_model_space() {
     let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
     let mut drawing = drawing(&part);
     let mut stack = UndoStack::new();
+    let original = drawing.view(FRONT).unwrap().geometry.clone();
+    for flip in [false, true] {
+        let off_part = Command::SetHalfSection {
+            view: FRONT,
+            half: Some(soliddraft_drawing::HalfSection {
+                axis: [Vec3::new(0.0, 25.0, 122.0), Vec3::new(120.0, 25.0, 122.0)],
+                flip,
+            }),
+        };
+        let err = stack.run(&mut drawing, &off_part, Some(&part)).unwrap_err();
+        assert!(err.to_string().contains("The symmetry line must divide the projected part"), "{err}");
+        assert_eq!(drawing.view(FRONT).unwrap().geometry, original);
+    }
     run(
         &mut stack,
         &mut drawing,
@@ -1265,6 +1278,16 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     let selected = annotate::view_anchor_near(&index, &ctx, point).expect("aligned occurrence");
     assert_eq!(selected.entity.kernel_hint, source.kernel_hint, "selected {selected:?} at {point:?}");
     assert_eq!(selected.entity.section_leg, 1, "selected {selected:?} at {point:?}");
+    let points = [point + Vec3::Z * 0.25, point + Vec3::Z * 0.75];
+    for kind in [SetKind::Ordinate, SetKind::Baseline, SetKind::Chain] {
+        let set =
+            annotate::dimension_set(&drawing, &index, &ctx, kind, LinearOrientation::Vertical, &points, 15.0).unwrap();
+        assert!(matches!(set.body, AnnotationKind::DimensionSet(set) if set.values == [0.5]));
+        for (anchor, at) in set.anchors.iter().zip(points) {
+            assert_eq!(anchor.entity.section_leg, 1);
+            assert_eq!(anchor.attach, Attach::Point { at });
+        }
+    }
     let id = section.id;
     let mut stack = UndoStack::new();
     run(&mut stack, &mut drawing, &part, Command::PlaceView { sheet: 0, view: section });
@@ -2573,6 +2596,55 @@ fn rebuilding_a_same_id_requirement_replaces_the_old_finish() {
 }
 
 #[test]
+fn rebuilding_a_location_moves_its_extension_to_the_new_feature_station() {
+    use soliddraft_kernel_api::pmi::{Anchor, At, PmiKind, Tolerance};
+    let kernel = BoxKernel::new();
+    let mut part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let topology = part.geometry.topology().unwrap();
+    let face = |x| topology.faces.iter().find(|f| f.centroid.x == x).unwrap().id;
+    let mut row = finish_row("Location", "", face(0.0));
+    let kind = |at| PmiKind::Location {
+        from: Anchor { feature: vec![face(0.0), face(120.0)], at },
+        to: Anchor { feature: vec![face(120.0)], at: At::Feature },
+        tolerance: Tolerance::None,
+        nominal: None,
+    };
+    row.item.kind = PmiKind::Location {
+        from: Anchor { feature: Vec::new(), at: At::Feature },
+        to: Anchor { feature: Vec::new(), at: At::Feature },
+        tolerance: Tolerance::None,
+        nominal: None,
+    };
+    row.on_body.as_mut().unwrap().kind = kind(At::Feature);
+    row.measured = vec![120.0];
+    part.requirements.rows.push(row);
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let ctx = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    soliddraft_drawing::pmi_items::import(&mut drawing, 0, &part, &index, &[ctx]).unwrap();
+    let old = soliddraft_drawing::review::place_of_item(&drawing, "Location").unwrap();
+    let a = drawing.annotation(old.annotation).unwrap();
+    assert!(
+        matches!(&a.body, AnnotationKind::Dimension(d) if d.value == soliddraft_drawing::DimValue::Measured { value: 120.0 })
+    );
+    part.digest = ContentHash::of_bytes(b"the distance now starts halfway between the faces");
+    let row = &mut part.requirements.rows[0];
+    let PmiKind::Location { from, .. } = &mut row.item.kind else { unreachable!() };
+    from.at = At::Middle;
+    row.on_body.as_mut().unwrap().kind = kind(At::Middle);
+    row.measured = vec![60.0];
+    update_from_model(&mut drawing, &part).unwrap();
+    let drawing = drawing_roundtrip(&drawing);
+    let new = soliddraft_drawing::review::place_of_item(&drawing, "Location").unwrap();
+    let a = drawing.annotation(new.annotation).unwrap();
+    assert!(
+        matches!(&a.body, AnnotationKind::Dimension(d) if d.value == soliddraft_drawing::DimValue::Measured { value: 60.0 })
+    );
+    let xf = drawing.view(a.view).unwrap().geometry.transform.unwrap();
+    assert_eq!(a.anchors.iter().map(|a| xf.unproject(a.cached).x).collect::<Vec<_>>(), [60.0, 120.0]);
+}
+
+#[test]
 fn saved_broken_view_interior_dimensions_follow_the_edge_parameter() {
     use soliddraft_drawing::measure::{Pick, propose_model};
     use soliddraft_drawing::{AlignAxis, Attach, Break, DimValue, Dimension, DimensionKind, ViewScale};
@@ -2673,6 +2745,31 @@ fn saved_broken_view_interior_dimensions_follow_the_edge_parameter() {
             );
             assert_eq!(annotation.anchors[1].cached, at);
         }
+        let short_index = PartIndex::build(&short).unwrap();
+        let ctx = derived::context(&shortened, &short, &short_index, FRONT).unwrap();
+        let picked = annotate::view_anchor_near(&short_index, &ctx, direction * 10.0).unwrap();
+        assert!(matches!(picked.attach, Attach::EdgeParameter { .. }));
+        for id in std::iter::once(smart).chain(sets.iter().copied()) {
+            run(
+                &mut stack,
+                &mut shortened,
+                &short,
+                Command::Reattach {
+                    annotation: id,
+                    end: 1,
+                    entity: picked.entity.clone(),
+                    attach: Some(picked.attach),
+                },
+            );
+            let repaired = shortened.annotation(id).unwrap();
+            assert_eq!(repaired.state, AnnotationState::Ok);
+            assert_eq!(repaired.anchors[1].cached, ctx.xf.point(direction * 10.0));
+            match &repaired.body {
+                AnnotationKind::Dimension(d) => assert_eq!(d.value, DimValue::Measured { value: 10.0 }),
+                AnnotationKind::DimensionSet(set) => assert_eq!(set.values, [10.0]),
+                _ => panic!("a repaired dimension"),
+            }
+        }
         update_from_model(&mut drawing, &grown).unwrap();
         let drawing = drawing_roundtrip(&drawing);
         let xf = drawing.view(FRONT).unwrap().geometry.transform.unwrap();
@@ -2689,6 +2786,156 @@ fn saved_broken_view_interior_dimensions_follow_the_edge_parameter() {
         let legacy = drawing.annotation(legacy_id).unwrap();
         assert_eq!(legacy.anchors[1].cached, xf.point(direction * 100.0));
         assert!(matches!(&legacy.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 100.0 }));
+    }
+}
+
+#[test]
+fn broken_edge_leaders_follow_their_model_station() {
+    use soliddraft_drawing::{AlignAxis, Attach, Break, ViewScale, measure};
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let taller = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 56.0));
+    let mut drawing = drawing(&part);
+    let mut stack = UndoStack::new();
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewScale { view: FRONT, scale: ViewScale::Custom { factor: 1.0 } },
+    );
+    run(
+        &mut stack,
+        &mut drawing,
+        &part,
+        Command::SetViewBreaks {
+            view: FRONT,
+            breaks: vec![Break { from: Vec3::X * 40.0, to: Vec3::X * 80.0, axis: AlignAxis::Horizontal }],
+        },
+    );
+    let index = PartIndex::build(&part).unwrap();
+    let ctx = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let at = Vec3::new(16.0, 0.0, 50.0);
+    let mut note = annotate::attached(
+        &drawing,
+        &index,
+        &ctx,
+        at,
+        AnnotationKind::Note { text: "Finish this edge".into(), leader: Vec::new() },
+        Point2::new(6.0, 10.0),
+    )
+    .unwrap();
+    let curve = ctx
+        .projected
+        .geometry
+        .curves
+        .iter()
+        .find(|c| {
+            c.source.same_projected_entity(&note.anchors[0].entity)
+                && c.path.elements().first().is_some_and(|el| el.end_point().unwrap().x < ctx.xf.point(at).u)
+        })
+        .expect("the retained left edge");
+    let clicked = measure::retained_leader(curve, &ctx.xf, Some(&index), ctx.xf.point(at)).unwrap();
+    assert_eq!(clicked.cached, note.anchors[0].cached);
+    assert!(matches!(clicked.attach, Attach::EdgeParameter { .. }));
+    let id = note.id;
+    let mut explicit = note.clone();
+    explicit.anchors[0].attach = Attach::Point { at };
+    note.anchors[0] = clicked;
+    run(&mut stack, &mut drawing, &part, Command::AddAnnotation { annotation: note });
+    let cli = annotate::attached(
+        &drawing,
+        &index,
+        &ctx,
+        at,
+        AnnotationKind::Datum { letter: "A".into() },
+        Point2::new(6.0, 12.0),
+    )
+    .unwrap();
+    let cli_id = cli.id;
+    explicit.id.0 = cli_id.0 + 1;
+    let explicit_id = explicit.id;
+    run(&mut stack, &mut drawing, &part, Command::AddAnnotation { annotation: cli });
+    run(&mut stack, &mut drawing, &part, Command::AddAnnotation { annotation: explicit });
+    let mut drawing = drawing_roundtrip(&drawing);
+    update_from_model(&mut drawing, &taller).unwrap();
+    let xf = drawing.view(FRONT).unwrap().geometry.transform.unwrap();
+    for id in [id, cli_id] {
+        let a = drawing.annotation(id).unwrap();
+        assert_eq!(a.state, AnnotationState::Ok);
+        assert_eq!(a.anchors[0].cached, xf.point(Vec3::new(16.0, 0.0, 56.0)));
+    }
+    assert_eq!(drawing.annotation(explicit_id).unwrap().anchors[0].cached, xf.point(at));
+}
+
+#[test]
+fn diagonal_centrelines_follow_the_flat_span_and_stop_at_both_gap_edges() {
+    use soliddraft_drawing::{AlignAxis, Break, ViewScale, measure};
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 120.0));
+    for (axis, direction) in [(AlignAxis::Horizontal, Vec3::X), (AlignAxis::Vertical, Vec3::Z)] {
+        let mut drawing = drawing(&part);
+        let mut stack = UndoStack::new();
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewScale { view: FRONT, scale: ViewScale::Custom { factor: 1.0 } },
+        );
+        run(
+            &mut stack,
+            &mut drawing,
+            &part,
+            Command::SetViewBreaks {
+                view: FRONT,
+                breaks: vec![Break { from: direction * 40.0, to: direction * 60.0, axis }],
+            },
+        );
+        let view = drawing.view(FRONT).unwrap();
+        let xf = view.geometry.transform.unwrap();
+        let o = view.position;
+        let model = |along, across| {
+            if axis == AlignAxis::Horizontal { Vec3::new(along, 0.0, across) } else { Vec3::new(across, 0.0, along) }
+        };
+        let points = [(0.0, 0.0), (100.0, 100.0), (10.0, 0.0), (90.0, 80.0)].map(|(s, q)| xf.point(model(s, q)));
+        let expected = [xf.point(model(40.0, 35.0)), xf.point(model(60.0, 55.0))];
+        let segments: Vec<_> = measure::centreline_segments(points, view.geometry.breaks.first().copied()).collect();
+        let [[_, left], [right, _]] = segments.as_slice() else { panic!("two retained spans: {segments:?}") };
+        for (p, expect) in [*left, *right].into_iter().zip(expected) {
+            assert!((p.u - expect.u).hypot(p.v - expect.v) < 1e-6, "{p:?} at {expect:?}");
+        }
+        let mut a = soliddraft_drawing::fixture::bracket_a3().sheets[0].annotations[0].clone();
+        a.id = drawing.next_annotation_id();
+        a.view = FRONT;
+        a.body = AnnotationKind::Centreline;
+        a.anchors = points
+            .into_iter()
+            .map(|p| {
+                let mut anchor = a.anchors[0].clone();
+                anchor.cached = p;
+                anchor
+            })
+            .collect();
+        a.state = AnnotationState::Ok;
+        let id = a.id;
+        apply(&mut drawing, &Command::AddAnnotation { annotation: a }).unwrap();
+        let list = layout_sheet(&drawing_roundtrip(&drawing), 0);
+        let paths: Vec<_> = list
+            .printable()
+            .filter_map(|item| match item {
+                Item::Path(path)
+                    if path.owner == soliddraft_drawing::display::Owner::Annotation(id)
+                        && path.role == Role::Centre =>
+                {
+                    Some(&path.path)
+                }
+                _ => None,
+            })
+            .collect();
+        let [left, right] = paths.as_slice() else { panic!("two printable centreline strokes") };
+        for (p, expect) in [left.elements().last().unwrap(), &right.elements()[0]].into_iter().zip(expected) {
+            let p = p.end_point().unwrap();
+            assert!((p.x - o.u - expect.u).hypot(p.y - o.v - expect.v) < 1e-6);
+        }
     }
 }
 

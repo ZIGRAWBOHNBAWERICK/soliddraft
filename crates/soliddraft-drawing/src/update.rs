@@ -185,8 +185,8 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             part,
             &index,
             |id| id == crate::SHEET || report.projections.iter().any(|(view, _)| *view == id),
-            true,
-        );
+            Some(&contexts),
+        )?;
         report.changed.retain(|change| drawing.annotation(change.annotation).is_some());
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
@@ -377,7 +377,7 @@ fn regenerate(
         }
     }
     if part.digest == staged.model.pinned {
-        crate::pmi_items::refresh(&mut staged, part, &index, |view| ids.contains(&view), false);
+        crate::pmi_items::refresh(&mut staged, part, &index, |view| ids.contains(&view), None)?;
     }
     staged.refused_views.retain(|refusal| !ids.contains(&refusal.view));
     *drawing = staged;
@@ -418,14 +418,12 @@ fn collect(drawing: &Drawing, report: &mut UpdateReport) {
 
 fn resolve_anchor(index: &PartIndex, ctx: &ViewContext, anchor: &crate::Anchor) -> Resolution {
     let resolved = project::resolve_in_view(index, ctx, &anchor.entity);
-    if let (Resolution::Found(Entity::Edge(edge)), Attach::EdgeParameter { t }) = (&resolved, anchor.attach)
+    if matches!(&resolved, Resolution::Found(Entity::Edge(_)))
+        && matches!(anchor.attach, Attach::Centre | Attach::EdgeParameter { .. })
         && !ctx.xf.breaks.is_empty()
-        && let Some(curve) = index.edge_curve(*edge)
+        && crate::measure::resolve_model_pick(index, &ctx.xf, anchor).is_none()
     {
-        let point = ctx.xf.point_on_leg(anchor.entity.section_leg, curve.point_at(t));
-        if ctx.xf.breaks.hides(point.dot(ctx.xf.breaks.axis(&ctx.xf.frame))) {
-            return Resolution::Lost("The attachment point is inside the break".into());
-        }
+        return Resolution::Lost("The attachment point is inside the break".into());
     }
     resolved
 }
@@ -590,9 +588,9 @@ fn remeasure(
         body => {
             if matches!(body, AnnotationKind::Centreline)
                 && a.anchors.len() == 4
-                && crate::measure::projected_edge_ends(&geometry, &ctx.xf)
-                    .and_then(crate::measure::centreline)
-                    .is_none()
+                && !crate::measure::projected_edge_ends(&geometry, &ctx.xf).is_some_and(|ends| {
+                    crate::measure::centreline_segments(ends, ctx.xf.gaps().first().copied()).next().is_some()
+                })
             {
                 a.state = AnnotationState::Dangling {
                     lost: (0..a.anchors.len()).collect(),
@@ -710,10 +708,17 @@ pub(crate) fn reattach_with(
         anchor.attach = attach;
     }
     // A round takes its centre, a line its middle, unless the end picks a side.
-    if let Resolution::Found(Entity::Edge(edge)) = resolve_anchor(&index, &ctx, anchor)
+    if let Resolution::Found(Entity::Edge(edge)) = project::resolve_in_view(&index, &ctx, &anchor.entity)
         && let Some(curve) = index.edge_curve(edge)
     {
         let round = crate::measure::radius_of(curve).is_some();
+        if attachment.is_none() && matches!(anchor.attach, Attach::EdgeParameter { .. }) {
+            let leg = anchor.entity.section_leg;
+            let xf = ctx.xf.in_leg(leg);
+            let segments = ctx.projected_edges(edge, leg).flat_map(|c| c.path.segments());
+            anchor.attach = project::parameter_on_drawn_edge(&xf, curve, xf.point(curve.point_at(0.5)), segments)
+                .map_or(Attach::Mid, |t| Attach::EdgeParameter { t });
+        }
         if round && !matches!(anchor.attach, Attach::Min | Attach::Max | Attach::EdgeParameter { .. }) {
             anchor.attach = Attach::Centre;
         } else if !round && matches!(anchor.attach, Attach::Centre | Attach::Silhouette) {
@@ -758,6 +763,9 @@ pub(crate) fn reattach_with(
         remeasure(a, &index, &ctx, &entities, &symbols, part);
         if let AnnotationState::Dangling { cause, .. } = &a.state {
             return Err(DrawingError::BadRequest(cause.clone()));
+        }
+        if !crate::pmi_items::repaired_location_matches(a, &ctx, part, &index)? {
+            a.source = None;
         }
         // Reattaching is a deliberate edit: the value it gives is the accepted one.
         if let AnnotationState::Changed { .. } = a.state {

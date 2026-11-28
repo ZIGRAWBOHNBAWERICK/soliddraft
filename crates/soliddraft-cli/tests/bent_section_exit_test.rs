@@ -39,25 +39,73 @@ fn segment_covers(segments: &[[Point2; 2]], point: Point2) -> bool {
 fn pdf_segments(pdf: &lopdf::Document) -> Vec<[Point2; 2]> {
     let page = pdf.get_pages()[&1];
     let contents = lopdf::content::Content::decode(&pdf.get_page_content(page)).unwrap();
+    stroked_segments(contents)
+}
+
+fn stroked_segments(contents: lopdf::content::Content) -> Vec<[Point2; 2]> {
     let mut segments = Vec::new();
+    let mut pending = Vec::new();
     let mut last = None;
+    let mut start = None;
+    let mut transform = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut saved = Vec::new();
+    let map = |[a, b, c, d, e, f]: [f64; 6], x, y| Point2::new(a * x + c * y + e, b * x + d * y + f);
     for op in contents.operations {
-        let point = || {
-            Point2::new(f64::from(op.operands[0].as_float().unwrap()), f64::from(op.operands[1].as_float().unwrap()))
-        };
+        let number = |i: usize| f64::from(op.operands[i].as_float().unwrap());
+        let point = |i| map(transform, number(i), number(i + 1));
+        if matches!(op.operator.as_str(), "h" | "s" | "b" | "b*")
+            && let (Some(from), Some(to)) = (last, start)
+        {
+            pending.push([from, to]);
+            last = start;
+        }
         match op.operator.as_str() {
-            "m" => last = Some(point()),
+            "q" => saved.push(transform),
+            "Q" => transform = saved.pop().unwrap(),
+            "cm" => {
+                let [a, b, c, d, _, _] = transform;
+                let [g, h, i, j, k, l] = std::array::from_fn(number);
+                let origin = map(transform, k, l);
+                transform = [a * g + c * h, b * g + d * h, a * i + c * j, b * i + d * j, origin.u, origin.v];
+            }
+            "m" => {
+                last = Some(point(0));
+                start = last;
+            }
             "l" => {
-                let end = point();
-                if let Some(start) = last.replace(end) {
-                    segments.push([start, end]);
+                let end = point(0);
+                if let Some(from) = last.replace(end) {
+                    pending.push([from, end]);
                 }
             }
-            "S" | "f" | "h" | "c" => last = None,
+            "c" => last = Some(point(4)),
+            "v" | "y" => last = Some(point(2)),
+            "S" | "s" | "B" | "B*" | "b" | "b*" => {
+                segments.append(&mut pending);
+                last = None;
+                start = None;
+            }
+            "n" | "f" | "F" | "f*" => {
+                pending.clear();
+                last = None;
+                start = None;
+            }
             _ => {}
         }
     }
     segments
+}
+
+#[test]
+fn readback_uses_painted_pdf_paths_in_page_points() {
+    let contents = lopdf::content::Content::decode(
+        b"2 0 0 2 10 20 cm 1 4 m 2 4 l n q 1 0 0 1 3 1 cm 1 4 m 2 4 l S Q 1 7 m 2 7 l S",
+    )
+    .unwrap();
+    assert_eq!(
+        stroked_segments(contents),
+        [[Point2::new(18.0, 30.0), Point2::new(20.0, 30.0)], [Point2::new(12.0, 34.0), Point2::new(14.0, 34.0)],]
+    );
 }
 
 fn recipes_dir() -> PathBuf {
@@ -244,6 +292,7 @@ fn offset_section_through_staggered_bracket_holes() {
     let pdf = lopdf::Document::load(dir.join("bracket.pdf")).expect("the PDF loads");
     assert_eq!(pdf.get_pages().len(), 1);
     let pdf_lines = pdf_segments(&pdf);
+    let page_point = |p: Point2| Point2::new(p.u * 72.0 / 25.4, p.v * 72.0 / 25.4);
     let sheet_point = |view: &View, at| {
         let p = view.geometry.transform.unwrap().point(at);
         Point2::new(view.position.u + p.u, view.position.v + p.v)
@@ -252,12 +301,12 @@ fn offset_section_through_staggered_bracket_holes() {
         for wall in [x - 4.5, x + 4.5] {
             let on = sheet_point(&section, Vec3::new(wall, y, 5.0));
             assert!(segment_covers(&svg_visible, on), "SVG hole wall at {on:?}");
-            assert!(segment_covers(&pdf_lines, on), "PDF hole wall at {on:?}");
+            assert!(segment_covers(&pdf_lines, page_point(on)), "PDF hole wall at {on:?}");
         }
     }
     let jog = sheet_point(parent, Vec3::new(70.0, 45.0, 10.0));
     assert!(segment_covers(&svg_cut, jog), "the SVG trace crosses the fixed jog");
-    assert!(segment_covers(&pdf_lines, jog), "the PDF trace crosses the fixed jog");
+    assert!(segment_covers(&pdf_lines, page_point(jog)), "the PDF trace crosses the fixed jog");
 
     // The flange gets taller: the drawing rebuilds the same cut against the new part.
     edit_recipe(&dir.join("bracket.json"), "flange", "distance", 70.0);

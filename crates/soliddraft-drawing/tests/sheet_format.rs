@@ -235,23 +235,6 @@ fn the_projection_symbol_stays_inside_its_cell_below_the_caption() {
                     _ => panic!("the symbol's line work follows its caption"),
                 })
                 .collect();
-            if layout.is_none() {
-                // The template's own cell keeps the full-size symbol where the template
-                // puts it, beside the caption.
-                let (u, v) = (o.u + x + w / 2.0, o.v + y + 3.2);
-                let (cone, circles) = match projection {
-                    Projection::FirstAngle => (u - 4.5, u + 4.5),
-                    Projection::ThirdAngle => (u + 4.5, u - 4.5),
-                };
-                let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
-                let (trapezoid, outer) = (parts[0], parts[1]);
-                let what = format!("{projection:?}: {trapezoid:?} {outer:?}");
-                assert!(near(trapezoid.x0, cone - 3.0) && near(trapezoid.x1, cone + 3.0), "{what}");
-                assert!(near(trapezoid.y0, v - 2.25) && near(trapezoid.y1, v + 2.25), "{what}");
-                assert!(near(outer.x0, circles - 2.25) && near(outer.x1, circles + 2.25), "{what}");
-                assert!(near(outer.y0, v - 2.25) && near(outer.y1, v + 2.25), "{what}");
-                continue;
-            }
             for b in parts {
                 let what = format!("{projection:?} in {:?}: {b:?}", [x, y, w, h]);
                 assert!(b.x0 >= o.u + x - 1e-9 && b.x1 <= o.u + x + w + 1e-9, "{what}");

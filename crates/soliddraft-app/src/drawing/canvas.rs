@@ -15,8 +15,9 @@ use soliddraft_drawing::library::{Align, Weight};
 use soliddraft_drawing::measure::{self as resolve, CurveShape, Pick, shape_of};
 use soliddraft_drawing::project::{self, view_bounds};
 use soliddraft_drawing::{
-    AlignAxis, Alignment, Annotation, AnnotationId, AnnotationKind, AnnotationState, Attach, Command, Dimension,
-    DimensionKind, FoldDirection, Orientation, StyleOverrides, Tolerance, ViewDisplay, ViewId, ViewKind, ViewScale,
+    AlignAxis, Alignment, Annotation, AnnotationId, AnnotationKind, AnnotationState, Attach, Command, CurveKind,
+    Dimension, DimensionKind, FoldDirection, Orientation, StyleOverrides, Tolerance, ViewDisplay, ViewId, ViewKind,
+    ViewScale,
 };
 use soliddraft_kernel_api::Point2;
 
@@ -520,8 +521,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
         DrawingTool::Reattach { annotation, end } => {
             if clicked {
-                if let Some(Hit { owner: Owner::Curve(view, index), end: picked_end, .. }) = hit {
-                    reattach_tool(s, annotation, end, view, index, picked_end, &mut push);
+                if let Some(hit @ Hit { owner: Owner::Curve(..), .. }) = hit
+                    && let Some(p) = pointer
+                {
+                    reattach_tool(s, doc, annotation, end, hit, p, &mut push);
                 } else {
                     s.say("Reattach: click an edge or circle of the view");
                 }
@@ -1420,13 +1423,14 @@ fn circle_tool(
 
 fn reattach_tool(
     s: &mut DrawingSession,
+    doc: &crate::document::Document,
     annotation: AnnotationId,
     end: usize,
-    view: ViewId,
-    index: usize,
-    picked_end: Option<Attach>,
+    hit: Hit,
+    pointer: Point2,
     push: &mut impl FnMut(DrawingAction),
 ) {
+    let Hit { owner: Owner::Curve(view, index), end: picked_end, .. } = hit else { return };
     let Some(a) = s.doc.drawing.annotation(annotation) else {
         s.set_tool(DrawingTool::Select);
         return;
@@ -1435,13 +1439,29 @@ fn reattach_tool(
         s.say("Pick in the view the dimension belongs to");
         return;
     }
-    let Some(curve) = s.sheet().view(view).and_then(|v| v.geometry.curves.get(index)) else { return };
-    push(DrawingAction::Command(Command::Reattach {
-        annotation,
-        end,
-        entity: curve.source.clone(),
-        attach: picked_end,
-    }));
+    let Some(v) = s.sheet().view(view) else { return };
+    let Some(curve) = v.geometry.curves.get(index) else { return };
+    let attach = if picked_end.is_none()
+        && !v.geometry.breaks.is_empty()
+        && curve.kind == CurveKind::Edge
+        && a.anchors.get(end).is_some_and(|anchor| anchor.attach != Attach::Centre)
+    {
+        let Some(xf) = v.geometry.transform.as_ref().or_else(|| s.doc.transforms.get(&view)) else { return };
+        let at = to_view(s, view, pointer);
+        let Ok(Some(anchor)) = tools::with_part(doc, |part, index| {
+            if !s.model_is(doc.model().id()) || part.digest.as_str() != v.geometry.source_digest {
+                return Ok(None);
+            }
+            Ok(soliddraft_drawing::measure::retained_leader(curve, xf, Some(index), at))
+        }) else {
+            s.say("Rebuild the drawing with its part before picking an edge");
+            return;
+        };
+        Some(anchor.attach)
+    } else {
+        picked_end
+    };
+    push(DrawingAction::Command(Command::Reattach { annotation, end, entity: curve.source.clone(), attach }));
 }
 
 /// The banner over the canvas after an update: what changed in the part and what it

@@ -98,8 +98,19 @@ pub(super) fn anchor_from_hit(
     let pointer = to_view(s, view, pointer);
     let measures = matches!(s.tool, DrawingTool::DimensionSet(_));
     if broken && !measures {
-        let xf = v.geometry.transform.as_ref().or_else(|| s.doc.transforms.get(&view));
-        return soliddraft_drawing::measure::retained_leader(c, xf, pointer).map(|anchor| (view, anchor));
+        let xf = v.geometry.transform.as_ref().or_else(|| s.doc.transforms.get(&view))?;
+        let anchor = if c.kind == CurveKind::Edge {
+            with_part(doc, |part, index| {
+                if !s.model_is(doc.model().id()) || part.digest.as_str() != v.geometry.source_digest {
+                    return Ok(None);
+                }
+                Ok(soliddraft_drawing::measure::retained_leader(c, xf, Some(index), pointer))
+            })
+            .ok()??
+        } else {
+            soliddraft_drawing::measure::retained_leader(c, xf, None, pointer)?
+        };
+        return Some((view, anchor));
     }
     let model = measures && (broken || c.source.section_leg != 0);
     if model && !cache_picking(s, doc, view) {
@@ -1310,7 +1321,7 @@ pub(super) fn line_annotation_tool(
     clicked: bool,
     push: &mut impl FnMut(DrawingAction),
 ) {
-    use soliddraft_drawing::measure::{AnchorGeometry, centreline, chamfer};
+    use soliddraft_drawing::measure::{AnchorGeometry, centreline_segments, chamfer};
     use soliddraft_drawing::{Dimension, DimensionKind, Entity, Resolution};
     use soliddraft_kernel_api::drawing::Curve3;
 
@@ -1429,7 +1440,7 @@ pub(super) fn line_annotation_tool(
         dim.chamfer_angle = Some(angle);
         s.draft.chamfer = Some(dim);
         s.draft.anchors.extend(ends);
-    } else if let Some([a, b]) = centreline(points) {
+    } else if let Some([a, b]) = centreline_segments(points, v.geometry.breaks.first().copied()).next() {
         let middle = Point2::new((a.u + b.u) / 2.0, (a.v + b.v) / 2.0);
         let anchors = s.draft.anchors.iter().cloned().chain(ends).collect();
         place(s, view, AnnotationKind::Centreline, middle, anchors);

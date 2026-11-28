@@ -84,7 +84,7 @@ pub fn view_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Optio
             }
             let leg = projected.source.section_leg;
             let at_on_leg = ctx.xf.point_on_leg(leg, at);
-            if ctx.xf.breaks.hides(at_on_leg.dot(ctx.xf.breaks.axis(&ctx.xf.frame))) {
+            if !ctx.xf.retains(at_on_leg) {
                 return None;
             }
             let q = ctx.xf.precise_point(at_on_leg);
@@ -96,8 +96,22 @@ pub fn view_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Optio
             Some((distance, nearest, !projected.visible, id, curve, leg))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)).then(a.5.cmp(&b.5)))?;
-    let at = ctx.retained_edge_point(id, leg, curve, at).unwrap_or(at);
-    anchor_on(index, &ctx.xf, id, curve, leg, at)
+    if ctx.xf.breaks.is_empty() {
+        return anchor_on(index, &ctx.xf, id, curve, leg, at);
+    }
+    let xf = ctx.xf.in_leg(leg);
+    let t = crate::project::parameter_on_drawn_edge(
+        &xf,
+        curve,
+        xf.precise_point(at),
+        ctx.projected_edges(id, leg).flat_map(|c| c.path.segments()),
+    )?;
+    let point = curve.point_at(t);
+    let mut anchor = anchor_on(index, &ctx.xf, id, curve, leg, point)?;
+    if matches!(anchor.attach, Attach::Point { .. } | Attach::Mid) {
+        anchor.attach = Attach::EdgeParameter { t };
+    }
+    Some(anchor)
 }
 
 fn curve_distance(curve: &soliddraft_kernel_api::drawing::Curve3, at: Vec3) -> f64 {
@@ -123,15 +137,7 @@ fn dimension_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Opti
     {
         return Some(Anchor { entity: circle.entity.clone(), attach: Attach::Centre, cached: circle.centre });
     }
-    let mut anchor = view_anchor_near(index, ctx, at)?;
-    if let Attach::Point { at } = anchor.attach {
-        let crate::Resolution::Found(crate::Entity::Edge(id)) = index.resolve(&anchor.entity) else { return None };
-        let curve = index.edge_curve(id)?;
-        let t = crate::project::parameter_near(curve, at, None)?;
-        anchor.attach = Attach::EdgeParameter { t };
-        anchor.cached = ctx.xf.point(ctx.xf.point_on_leg(anchor.entity.section_leg, curve.point_at(t)));
-    }
-    Some(anchor)
+    view_anchor_near(index, ctx, at)
 }
 
 fn new_annotation(

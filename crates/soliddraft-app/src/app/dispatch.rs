@@ -23,9 +23,43 @@ use super::Tab;
 use super::presentation::docks::center_dock;
 use super::workspace::SolidDraftApp;
 
+fn order_sheet_title_edits(actions: &mut Vec<AppAction>) {
+    use crate::drawing::DrawingAction;
+    use soliddraft_drawing::Command as DrawCommand;
+
+    let Some(change) = actions.iter().position(|action| {
+        matches!(action, AppAction::Drawing(DrawingAction::MoveSheet { .. } | DrawingAction::DeleteSheet(_)))
+    }) else {
+        return;
+    };
+    let deleted: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            AppAction::Drawing(DrawingAction::DeleteSheet(sheet)) => Some(*sheet),
+            _ => None,
+        })
+        .collect();
+    let title_sheet = |action: &AppAction| match action {
+        AppAction::Drawing(DrawingAction::Command(
+            DrawCommand::SetTitleField { sheet, .. }
+            | DrawCommand::BindTitleProperty { sheet, .. }
+            | DrawCommand::SetTitleLayout { sheet, .. },
+        )) => Some(Some(*sheet)),
+        AppAction::Drawing(DrawingAction::Command(DrawCommand::SetMeta { .. })) => Some(None),
+        _ => None,
+    };
+    let (edits, rest): (Vec<_>, Vec<_>) =
+        actions.split_off(change).into_iter().partition(|action| title_sheet(action).is_some());
+    actions.extend(edits);
+    actions.retain(|action| title_sheet(action).flatten().is_none_or(|sheet| !deleted.contains(&sheet)));
+    actions.extend(rest);
+}
+
 impl SolidDraftApp {
     pub(super) fn apply_actions(&mut self, ctx: &egui::Context) {
-        for action in self.state.take_actions() {
+        let mut actions = self.state.take_actions();
+        order_sheet_title_edits(&mut actions);
+        for action in actions {
             // In the browser a command that needs exact geometry the page has not read yet
             // waits, with the actions after it, until the page has read it.
             #[cfg(target_arch = "wasm32")]

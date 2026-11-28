@@ -399,13 +399,14 @@ impl ViewContext {
         leg: u8,
         curve: &Curve3,
         preferred: Vec3,
+        visible_only: bool,
     ) -> Option<Vec3> {
         let xf = self.xf.in_leg(leg);
         parameter_on_drawn_edge(
             &xf,
             curve,
             xf.precise_point(preferred),
-            self.projected_edges(edge, leg).flat_map(|c| c.path.segments()),
+            self.projected_edges(edge, leg).filter(|c| !visible_only || c.visible).flat_map(|c| c.path.segments()),
         )
         .map(|t| curve.point_at(t))
     }
@@ -504,11 +505,21 @@ pub fn compute_view(
     compute_view_at(drawing, part, index, view, sheet, memo, 0, None, None)
 }
 
-pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, xf: &ViewTransform) {
+pub(crate) fn reproject_parent_marks(kind: &mut ViewKind, parent: &ViewContext) {
+    let xf = &parent.xf;
     match kind {
         ViewKind::Section { line, model_line, .. } if model_line.len() == line.len() => {
             for (p, m) in line.iter_mut().zip(model_line.iter()) {
                 *p = xf.point(*m);
+            }
+            if line.len() > 2 {
+                let flat = xf.unbroken();
+                let mut trace: Vec<_> = model_line.iter().map(|&point| flat.precise_point(point)).collect();
+                crate::derived::extend_trace(&mut trace, xf, parent.projected.geometry.bbox);
+                let n = line.len() - 1;
+                for end in [0, n] {
+                    line[end] = xf.point(flat.unproject(trace[end]));
+                }
             }
         }
         ViewKind::Detail { center, profile, model_center: Some(m), .. } => {
@@ -551,9 +562,9 @@ fn compute_view_at(
     let refused = |error| view_refusal(|| view_label_in(drawing, &drawing.sheets[sheet], view), error);
     let mut kind = view.kind.clone();
     if let Some(parent) = view.geometry_parent() {
-        let after = &memo[&parent].xf;
+        let after = &memo[&parent];
         if let Some(before) = previous.and_then(|views| views.get(&parent)) {
-            remap_parent_boundary(&mut kind, before, after);
+            remap_parent_boundary(&mut kind, before, &after.xf);
         }
         reproject_parent_marks(&mut kind, after);
     }

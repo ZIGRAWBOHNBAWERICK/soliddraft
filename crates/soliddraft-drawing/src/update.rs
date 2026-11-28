@@ -227,26 +227,27 @@ pub(crate) fn follow_parent(drawing: &mut Drawing, id: ViewId, contexts: &Contex
     let Some(pctx) = contexts.get(&parent.id).filter(|ctx| ctx.projected.geometry == parent.geometry) else {
         return;
     };
-    let xf = pctx.xf;
     let view = drawing.view_mut(id).expect("found");
-    project::reproject_parent_marks(&mut view.kind, &xf);
+    project::reproject_parent_marks(&mut view.kind, pctx);
 }
 
 /// Points an auxiliary view at another edge, the repair for a lost reference edge, and
 /// remakes its line work.
 pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: EntityRef) -> Result<(), DrawingError> {
-    let view = drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
+    let mut staged = drawing.clone();
+    let view = staged.view_mut(id).ok_or(DrawingError::UnknownView(id))?;
     let ViewKind::Auxiliary { edge, .. } = &mut view.kind else {
         return Err(DrawingError::BadRequest(format!("{id} is not an auxiliary view")));
     };
     *edge = entity;
-    regenerate_view(drawing, part, id)
+    regenerate(drawing, staged, part, id, None)
 }
 
 /// Remakes a view and its dependent descendants, keeping placement and accepted
 /// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
-    regenerate(drawing, part, id, None)
+    let staged = drawing.clone();
+    regenerate(drawing, staged, part, id, None)
 }
 
 pub(crate) fn edit_breaks(
@@ -259,7 +260,8 @@ pub(crate) fn edit_breaks(
     if matches!(view.kind, ViewKind::Detail { .. }) {
         return Err(DrawingError::BadRequest("A detail inherits its parent's break".into()));
     }
-    regenerate(drawing, part, id, Some(breaks))
+    let staged = drawing.clone();
+    regenerate(drawing, staged, part, id, Some(breaks))
 }
 
 fn saved_broken_transforms(drawing: &Drawing) -> project::Transforms {
@@ -284,6 +286,7 @@ fn remap_parent(drawing: &mut Drawing, id: ViewId, previous: &project::Transform
 
 fn regenerate(
     drawing: &mut Drawing,
+    mut staged: Drawing,
     part: &Part,
     id: ViewId,
     breaks: Option<Vec<crate::Break>>,
@@ -296,7 +299,6 @@ fn regenerate(
         .collect();
     let index = PartIndex::build(part)?;
     let mut previous = saved_broken_transforms(drawing);
-    let mut staged = drawing.clone();
     let break_edit = breaks.is_some();
     if let Some(breaks) = breaks {
         // Where the views were drawn, so crops and callouts stay on the same material.
@@ -725,7 +727,7 @@ pub(crate) fn reattach_with(
             anchor.attach = Attach::Mid;
         } else if matches!(anchor.attach, Attach::Point { .. }) {
             let mid = curve.point_at(0.5);
-            let at = ctx.retained_edge_point(edge, anchor.entity.section_leg, curve, mid).unwrap_or(mid);
+            let at = ctx.retained_edge_point(edge, anchor.entity.section_leg, curve, mid, false).unwrap_or(mid);
             anchor.attach = Attach::Point { at };
         }
         let unfolded = anchor_curve(&ctx, anchor, Some(curve));

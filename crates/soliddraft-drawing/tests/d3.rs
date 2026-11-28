@@ -234,6 +234,12 @@ fn an_auxiliary_view_looks_square_to_its_edge_and_dangles_when_it_goes() {
     run(&mut stack, &mut d, &part, Command::PlaceView { sheet: 0, view });
     assert!(texts(&d, 0).contains(&"VIEW A".to_owned()));
     assert!(layout_sheet(&d, 0).items.iter().any(|i| i.role() == Role::CuttingPlane), "the arrow on the front view");
+    let before = d.clone();
+    let end_on = edge_near(&part, Vec3::new(40.0, 15.0, 0.0)).unwrap();
+    let repair = Command::ReattachView { view: id, edge: end_on };
+    let error = soliddraft_drawing::apply_with(&mut d, &repair, &part).unwrap_err();
+    assert!(error.to_string().contains("end on"), "{error}");
+    assert_eq!(d, before);
 
     let half =
         soliddraft_drawing::HalfSection { axis: [Vec3::new(20.0, 0.0, 5.0), Vec3::new(20.0, 30.0, 5.0)], flip: false };
@@ -1396,6 +1402,109 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
         "{:?}",
         auxiliary.map(|(view, _)| view.kind)
     );
+}
+
+#[test]
+fn rebuilt_bent_traces_follow_the_parent_bounds_after_reopen() {
+    let mut kernel = BoxKernel::new();
+    kernel.sections = true;
+    let original = box_part(&kernel, "block", Vec3::new(120.0, 100.0, 20.0));
+    let larger = box_part(&kernel, "block", Vec3::new(180.0, 140.0, 20.0));
+    let offset = [
+        Vec3::new(0.0, 23.0, 0.0),
+        Vec3::new(70.0, 23.0, 0.0),
+        Vec3::new(70.0, 67.0, 0.0),
+        Vec3::new(120.0, 67.0, 0.0),
+    ];
+    let aligned = [Vec3::new(0.0, 30.0, 0.0), Vec3::new(60.0, 30.0, 0.0), Vec3::new(60.0, 100.0, 0.0)];
+    for (points, outer) in [(&offset[..], Vec3::new(186.0, 67.0, 0.0)), (&aligned[..], Vec3::new(60.0, 146.0, 0.0))] {
+        let mut drawing = drawing(&original);
+        let top = drawing.sheets[0]
+            .views
+            .iter()
+            .find(|v| project::view_label_in(&drawing, &drawing.sheets[0], v) == "Top view")
+            .unwrap()
+            .id;
+        apply(
+            &mut drawing,
+            &Command::SetViewScale { view: top, scale: soliddraft_drawing::ViewScale::Custom { factor: 1.0 } },
+        )
+        .unwrap();
+        let index = PartIndex::build(&original).unwrap();
+        let line = derived::cutting_path(&drawing, &original, &index, top, points).unwrap();
+        let (section, _) = derived::new_section_along(&drawing, &original, &index, 0, top, &line, false, None).unwrap();
+        let ViewKind::Section { model_line, .. } = &section.kind else { unreachable!() };
+        let saved = model_line.clone();
+        let id = section.id;
+        apply(&mut drawing, &Command::PlaceView { sheet: 0, view: section }).unwrap();
+        update_from_model(&mut drawing, &larger).unwrap();
+        let drawing = drawing_roundtrip(&drawing);
+        let xf = drawing.view(top).unwrap().geometry.transform.unwrap();
+        let ViewKind::Section { line, model_line, .. } = &drawing.view(id).unwrap().kind else { unreachable!() };
+        assert_eq!(*model_line, saved);
+        assert_eq!(
+            line[1..line.len() - 1],
+            points[1..points.len() - 1].iter().map(|p| xf.point(*p)).collect::<Vec<_>>()
+        );
+        assert_eq!(line[0], xf.point(Vec3::new(-6.0, points[0].y, 0.0)));
+        assert_eq!(*line.last().unwrap(), xf.point(outer));
+    }
+}
+
+#[test]
+fn a_face_note_leader_avoids_the_hidden_middle_of_its_edge() {
+    use soliddraft_drawing::{Attach, Entity, Resolution};
+    use soliddraft_kernel_api::drawing::{Curve3, CurveSource, ViewCurve};
+    use soliddraft_kernel_api::pmi::PmiKind;
+    let kernel = BoxKernel::new();
+    let mut part = box_part(&kernel, "block", Vec3::new(100.0, 30.0, 20.0));
+    let mut drawing = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let mut ctx = derived::context(&drawing, &part, &index, FRONT).unwrap();
+    let (edge, a, b) = ctx
+        .curves
+        .curves
+        .iter()
+        .find_map(|drawn| {
+            let CurveSource::Edge(edge) = drawn.source else { return None };
+            let curve = index.edge_curve(edge)?;
+            let (a, b) = (curve.start(), curve.end());
+            (drawn.visible && (a.x - b.x).abs() == 100.0).then_some((edge, a, b))
+        })
+        .unwrap();
+    let at = |x| Vec3::new(x, a.y, a.z);
+    assert_eq!((a.y, a.z), (b.y, b.z));
+    ctx.curves.curves = [(0.0, 45.0, true), (45.0, 55.0, false), (55.0, 100.0, true)]
+        .into_iter()
+        .map(|(lo, hi, visible)| {
+            ViewCurve::new(Curve3::Line { a: at(lo), b: at(hi) }, CurveSource::Edge(edge), visible)
+        })
+        .collect();
+    ctx.projected = project::project(&index, &ctx.curves, &ctx.xf, part.digest.as_str(), false);
+    let topology = part.geometry.topology().unwrap();
+    let face = topology.edge(edge).unwrap().faces[0];
+    let mut row = finish_row("Flange note", "", face);
+    let text = "Polish the rear flange".to_owned();
+    let reference = soliddraft_model::FaceRef {
+        feature: soliddraft_model::FeatureId(1),
+        generator: soliddraft_model::Generator::StartCap,
+        ordinal: 0,
+        fingerprint: soliddraft_model::FaceFingerprint::of(topology.face(face).unwrap()),
+        label: String::new(),
+    };
+    row.item.kind = PmiKind::FaceNote { face: reference, text: text.clone() };
+    row.on_body.as_mut().unwrap().kind = PmiKind::FaceNote { face, text: text.clone() };
+    part.requirements.rows.push(row);
+    soliddraft_drawing::pmi_items::import(&mut drawing, 0, &part, &index, &[ctx]).unwrap();
+    let drawing = drawing_roundtrip(&drawing);
+    let target = soliddraft_drawing::review::place_of_item(&drawing, "Flange note").unwrap();
+    let note = drawing.annotation(target.annotation).unwrap();
+    assert!(matches!(&note.body, AnnotationKind::Note { text: actual, .. } if *actual == text));
+    let [anchor] = note.anchors.as_slice() else { panic!("one leader") };
+    assert_eq!(index.resolve(&anchor.entity), Resolution::Found(Entity::Edge(edge)));
+    let Attach::Point { at } = anchor.attach else { panic!("a point on the flange edge") };
+    assert!(at.x <= 45.0 + 1e-6 || at.x >= 55.0 - 1e-6, "{at:?}");
+    assert_eq!((at.y, at.z), (a.y, a.z));
 }
 
 #[test]

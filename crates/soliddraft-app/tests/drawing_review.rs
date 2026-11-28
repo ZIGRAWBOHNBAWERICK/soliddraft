@@ -73,6 +73,69 @@ fn review_value(app: &App, column: &str, value: &str) {
 }
 
 #[test]
+fn rebuilding_a_hosted_tolerance_moves_it_under_the_new_features_size() {
+    use soliddraft_drawing::{Annotation, Drawing, GdtCharacteristic, file, review};
+
+    let root = std::env::temp_dir().join(format!("soliddraft-hosted-frame-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(root.join("config")));
+    let doc = Document::new("P1 bracket", Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
+    let mut app = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    let state = &mut app.state_mut().state;
+    bracket::build(state);
+    let faces = bracket::faces(state, 30.0);
+    for (name, face) in [("Bore diameter", &faces.bore), ("Boss diameter", &faces.boss)] {
+        bracket::call(state, "pmi_add", json!({"kind":"diameter", "name":name, "faces":[face]}));
+    }
+    bracket::call(
+        state,
+        "pmi_add",
+        json!({"kind":"tolerance", "name":"Cylindricity", "characteristic":"cylindricity", "value":"0.05", "faces":[faces.bore]}),
+    );
+    app.run_steps(2);
+    drawing(&mut app, DrawingAction::MakeDrawing);
+    drawing(&mut app, DrawingAction::CreateDrawing);
+    fn item<'a>(drawing: &'a Drawing, name: &str) -> &'a Annotation {
+        let target = review::place_of_item(drawing, name).unwrap_or_else(|| panic!("{name} is on the drawing"));
+        drawing.annotation(target.annotation).unwrap()
+    }
+    let initial = &session(&app).doc.drawing;
+    let old = item(initial, "Cylindricity").clone();
+    assert!(old.anchors.is_empty());
+    let boss = item(initial, "Boss diameter").clone();
+    let bore = item(initial, "Bore diameter");
+    assert_eq!(old.view, bore.view);
+    assert!(old.placement.v < bore.placement.v);
+
+    let doc = &mut app.state_mut().state.doc;
+    let mut frame = doc.model().pmi().item("Cylindricity").unwrap().clone();
+    let PmiKind::Gdt { features, .. } = &mut frame.kind else { panic!("a tolerance frame") };
+    let PmiKind::Size { features: boss_faces, .. } = &doc.model().pmi().item("Boss diameter").unwrap().kind else {
+        panic!("a diameter")
+    };
+    features.clone_from(boss_faces);
+    doc.put_pmi(frame, Some("Cylindricity".into())).unwrap();
+    drawing(&mut app, DrawingAction::Rebuild);
+    let drawing = &session(&app).doc.drawing;
+    let bytes = file::to_bytes(drawing, &file::FileMeta::new("test", drawing.meta.units)).unwrap();
+    let (reopened, _) = file::from_bytes(&bytes).unwrap();
+    let frame = item(&reopened, "Cylindricity");
+    let host = item(&reopened, "Boss diameter");
+    assert_eq!((host.id, host.placement), (boss.id, boss.placement));
+    assert_eq!(frame.view, host.view);
+    assert!(frame.anchors.is_empty());
+    assert_ne!(frame.placement, old.placement);
+    assert!((4.0..12.0).contains(&(host.placement.v - frame.placement.v)));
+    assert!(
+        matches!(&frame.body, AnnotationKind::Gdt { characteristic: GdtCharacteristic::Cylindricity, tolerance, .. } if *tolerance == 0.05)
+    );
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_drawing_revision() {
     let root = std::env::temp_dir().join(format!("soliddraft-drawing-review-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);

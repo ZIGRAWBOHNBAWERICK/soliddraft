@@ -90,7 +90,13 @@ pub fn extend_cutting_line(
     mut line: Vec<Point2>,
 ) -> Result<Vec<Point2>, DrawingError> {
     CutPath::of_line(&line, false).map_err(|e| DrawingError::BadRequest(format!("cutting line: {e}")))?;
-    let [x0, y0, x1, y1] = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?.geometry.bbox;
+    let bbox = drawing.view(parent).ok_or(DrawingError::UnknownView(parent))?.geometry.bbox;
+    extend_trace(&mut line, xf, bbox);
+    let flat = xf.unbroken();
+    Ok(line.into_iter().map(|p| xf.precise_point(flat.unproject(p))).collect())
+}
+
+pub(crate) fn extend_trace(line: &mut [Point2], xf: &ViewTransform, [x0, y0, x1, y1]: [f64; 4]) {
     let flat = xf.unbroken();
     let [lo, hi] = [Point2::new(x0, y0), Point2::new(x1, y1)].map(|p| flat.precise_point(xf.unproject(p)));
     let [x0, y0, x1, y1] = [lo.u, lo.v, hi.u, hi.v];
@@ -109,13 +115,12 @@ pub fn extend_cutting_line(
                 f64::INFINITY
             }
         };
-        let t = exit(from.u, du, x0, x1).min(exit(from.v, dv, y0, y1)).max(0.0);
-        Point2::new(from.u + du * t, from.v + dv * t)
+        let t = exit(toward.u, du, x0, x1).min(exit(toward.v, dv, y0, y1));
+        if t > 0.0 && t.is_finite() { Point2::new(toward.u + du * t, toward.v + dv * t) } else { from }
     };
     let n = line.len();
     line[0] = reach(line[0], line[1]);
     line[n - 1] = reach(line[n - 1], line[n - 2]);
-    Ok(line.into_iter().map(|p| xf.precise_point(flat.unproject(p))).collect())
 }
 
 /// An offset cutting line through `centres` in order: a leg through each, horizontal
@@ -211,7 +216,7 @@ pub fn new_section_along(
     let display = ViewDisplay { hidden: HiddenLines::Removed, ..ViewDisplay::ORTHOGRAPHIC };
     let mut view = blank(drawing, kind, display);
     let ctx = project::compute_view(drawing, part, index, &view, sheet, &mut memo)?;
-    project::reproject_parent_marks(&mut view.kind, &memo[&parent].xf);
+    project::reproject_parent_marks(&mut view.kind, &memo[&parent]);
     view.geometry = ctx.projected.geometry.clone();
     // The view goes where the eye is (third angle) or where the arrows point (first
     // angle), in line with its parent.

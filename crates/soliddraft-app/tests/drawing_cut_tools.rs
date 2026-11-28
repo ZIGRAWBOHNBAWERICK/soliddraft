@@ -1219,6 +1219,49 @@ fn the_sheet_panel_edits_and_clears_a_title_value_set_on_the_sheet() {
 }
 
 #[test]
+fn title_edits_follow_the_sheet_when_an_action_changes_its_index() {
+    let root = std::env::temp_dir().join(format!("soliddraft-title-sheet-order-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    drawing(&mut app, DrawingAction::AddSheet);
+    let first = session(&app).doc.drawing.sheets[0].name.clone();
+    let second = session(&app).doc.drawing.sheets[1].name.clone();
+    let owner = |sheet: usize, value: &str| {
+        DrawingAction::Command(DrawCommand::SetTitleField { sheet, key: "owner".into(), value: value.into() })
+    };
+    let bind = |sheet: usize, property: &str| {
+        DrawingAction::Command(DrawCommand::BindTitleProperty { sheet, key: "title".into(), property: property.into() })
+    };
+    for (from, to, value) in [(0, 1, "Moved right"), (1, 0, "Moved left")] {
+        for action in [DrawingAction::MoveSheet { sheet: from, to }, owner(from, value), bind(from, value)] {
+            app.state_mut().state.push(AppAction::Drawing(action));
+        }
+        app.run_steps(3);
+        let sheets = &session(&app).doc.drawing.sheets;
+        assert_eq!(sheets[to].name, first);
+        assert_eq!(sheets[to].format_overrides["owner"], value);
+        assert_eq!(sheets[to].title_bindings["title"], value);
+        assert_eq!(sheets[from].name, second);
+        assert!(!sheets[from].format_overrides.contains_key("owner"));
+        assert!(!sheets[from].title_bindings.contains_key("title"));
+    }
+    for action in [owner(0, "Discarded owner"), DrawingAction::DeleteSheet(0), bind(0, "Discarded binding")] {
+        app.state_mut().state.push(AppAction::Drawing(action));
+    }
+    app.run_steps(3);
+    let sheet = &session(&app).doc.drawing.sheets[0];
+    assert_eq!(sheet.name, second);
+    assert!(!sheet.format_overrides.contains_key("owner"));
+    assert!(!sheet.title_bindings.contains_key("title"));
+    drawing(&mut app, DrawingAction::Undo);
+    let restored = &session(&app).doc.drawing.sheets[0];
+    assert_eq!(restored.name, first);
+    assert_eq!(restored.format_overrides["owner"], "Moved left");
+    assert_eq!(restored.title_bindings["title"], "Moved left");
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn mixed_sheet_reference_dimensions_use_the_owning_sheets_style() {
     use soliddraft_app::drawing::document::DrawingDoc;
     let mut drawing = soliddraft_drawing::fixture::bracket_a3();

@@ -559,11 +559,11 @@ pub fn update_assembly_drawing(drawing: &Drawing, model: &AssemblyModel<'_>) -> 
                     }
                 }
             }
-            let parent_xf = out.view(id).and_then(|v| v.geometry_parent()).and_then(|p| contexts.get(&p)).map(|c| c.xf);
+            let parent = out.view(id).and_then(|v| v.geometry_parent()).and_then(|p| contexts.get(&p));
             if let Some(view) = out.view_mut(id) {
                 view.geometry = ctx.projected.geometry.clone();
-                if let Some(xf) = parent_xf {
-                    project::reproject_parent_marks(&mut view.kind, &xf);
+                if let Some(parent) = parent {
+                    project::reproject_parent_marks(&mut view.kind, parent);
                 }
             }
         }

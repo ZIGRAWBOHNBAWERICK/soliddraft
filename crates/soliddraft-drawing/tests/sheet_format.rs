@@ -320,6 +320,33 @@ fn a_sheet_annotation_kept_as_a_note_uses_its_own_sheets_style() {
 }
 
 #[test]
+fn larger_paper_cannot_restyle_a_note_off_the_page() {
+    use soliddraft_drawing::{Annotation, AnnotationKind, SHEET, Template, apply};
+    use soliddraft_kernel_api::Point2;
+    let mut drawing = Drawing::new(fixture::bracket_a3().model, &Template::by_id("ansi-b").unwrap());
+    let id = drawing.next_annotation_id();
+    let note = Annotation {
+        id,
+        view: SHEET,
+        body: AnnotationKind::Note { text: "One\nTwo\nThree\nFour".into(), leader: vec![] },
+        anchors: vec![],
+        placement: Point2::new(100.0, 20.0),
+        style: Default::default(),
+        state: Default::default(),
+        source: None,
+    };
+    apply(&mut drawing, &Command::AddNote { annotation: note }).unwrap();
+    let before = drawing.clone();
+    let format = Command::SetSheetFormat { sheet: 0, template: "iso-a2".into() };
+    let error = apply(&mut drawing, &format).unwrap_err().to_string();
+    assert!(error.contains(&format!("annotation {id}")), "{error}");
+    assert_eq!(drawing, before);
+    apply(&mut drawing, &Command::MoveAnnotation { annotation: id, to: Point2::new(100.0, 30.0) }).unwrap();
+    apply(&mut drawing, &format).unwrap();
+    assert_eq!(display::layout_sheet(&drawing, 0).paper, (594.0, 420.0));
+}
+
+#[test]
 fn changing_to_a_smaller_paper_names_the_views_that_would_be_off_sheet() {
     use soliddraft_drawing::{ViewId, apply, project};
     use soliddraft_kernel_api::Point2;

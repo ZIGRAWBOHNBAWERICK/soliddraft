@@ -98,7 +98,7 @@ fn symbol_zones(sheet: &Sheet, revision: &str, ctx: &Context<'_>) -> String {
 }
 
 /// Every table of a sheet as items.
-pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut Vec<Item>) {
+pub(super) fn table_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut Vec<Item>) {
     let mut next_prefix = "A".to_owned();
     for (i, table) in sheet.tables.iter().enumerate() {
         let owner = Owner::Table(i);
@@ -121,7 +121,9 @@ pub(super) fn table_items(_drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, 
                 });
                 grid(table, ("HOLE TABLE · MODEL ORIGIN", &HOLE_COLUMNS), rows, owner, ctx, items);
 
-                let scale = crate::project::effective_scale(sheet, view);
+                // The view's scale follows a parent on any sheet.
+                let scale = crate::project::view_scale(drawing, view.id)
+                    .unwrap_or_else(|_| crate::project::effective_scale(sheet, view));
                 let mut tags = table.holes.iter().enumerate().peekable();
                 while let Some((i, h)) = tags.next() {
                     let mut label = format!("{prefix}{}", i + 1);

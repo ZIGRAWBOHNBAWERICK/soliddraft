@@ -5,14 +5,14 @@
 
 use egui::{Key, Modifiers, Pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable, by};
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::document::{Command, CutParams, Document, ExtrudeParams, PlaneKind, SketchPlane};
 use soliddraft_app::drawing::{DrawingAction, DrawingSel, DrawingSession, DrawingTool};
 use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::state::AppAction;
 use soliddraft_drawing::{
-    AlignAxis, AnnotationKind, Command as DrawCommand, DimValue, SetKind, View, ViewId, ViewKind, ViewScale,
+    AlignAxis, AnnotationKind, Command as DrawCommand, CurveKind, DimValue, SetKind, View, ViewId, ViewKind, ViewScale,
 };
 use soliddraft_kernel_api::{Point2, Vec3};
 
@@ -234,6 +234,8 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     let ViewKind::Section { line, model_line, .. } = &offset.kind else { unreachable!() };
     assert_eq!((line.len(), model_line.len()), (4, 4), "two legs and a jog: {line:?}");
     near(cut_area(&app, &offset), 1110.0 + 410.0, 1e-3, "offset cut area");
+    drawing(&mut app, DrawingAction::Select(Some(DrawingSel::View(offset.id))));
+    assert!(shows(&app, "offset, 2 parallel cuts"), "the panel names the offset cut");
 
     // An aligned section about the bore: a leg along +X, the pivot on the bore's axis
     // (it snaps), a leg along +Y turned into the plane of the first. Each leg cuts the
@@ -248,6 +250,8 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     let ViewKind::Section { line, .. } = &aligned.kind else { unreachable!() };
     assert_eq!(line.len(), 3, "two legs about a pivot: {line:?}");
     near(cut_area(&app, &aligned), (180.0 + 380.0) + (180.0 + 330.0), 1e-3, "aligned cut area");
+    drawing(&mut app, DrawingAction::Select(Some(DrawingSel::View(aligned.id))));
+    assert!(shows(&app, "aligned, 2 legs about a pivot"), "the panel names the aligned cut");
 
     // A half section of the front view about the bore's axis; the panel flips it,
     // then removes it.
@@ -335,6 +339,202 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
         assert_eq!(after.kind, before.kind, "the {what} section's line reopens");
         near(cut_area(&app, &after), cut_area(&app, before), 1e-6, what);
     }
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The bracket with a ledge on the flange's inner face: 15 x 90, from z 30 to 40.
+fn ledged_bracket() -> Document {
+    let mut doc = bracket();
+    let plane = SketchPlane::Reference { plane: PlaneKind::Top, offset: 30.0 };
+    let id = doc.apply(Command::AddSketch { plane }).unwrap().unwrap();
+    doc.apply(Command::EditSketch { id, sketch: rectangle(P2::new(5.0, 0.0), P2::new(20.0, 90.0)) }).unwrap();
+    let params = ExtrudeParams { sketch: Some(id), depth: 10.0, ..Default::default() };
+    doc.apply(Command::AddExtrude { params, via_assistant: false }).unwrap().unwrap();
+    for f in &doc.features {
+        assert_eq!(f.status, soliddraft_app::document::FeatureStatus::Ok, "{}: {:?}", f.name, f.status);
+    }
+    doc.selection = None;
+    doc.dirty = false;
+    doc
+}
+
+/// Whether the window shows `text` as a label or a value.
+fn shows(app: &App, text: &str) -> bool {
+    app.query_all(by()).any(|n| {
+        let node = n.accesskit_node();
+        node.label().as_deref() == Some(text) || node.value().as_deref() == Some(text)
+    })
+}
+
+/// The straight visible edges a section draws along the sheet's X from aligned leg
+/// `leg`: index, height and the two ends' X, in view millimetres.
+fn level_edges(v: &View, leg: u8) -> Vec<(usize, f64, [f64; 2])> {
+    v.geometry
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.visible && c.kind == CurveKind::Edge && c.source.section_leg == leg)
+        .filter_map(|(i, c)| {
+            let [kurbo::PathEl::MoveTo(a), kurbo::PathEl::LineTo(b)] = c.path.elements() else { return None };
+            ((a.y - b.y).abs() < 1e-6 && (a.x - b.x).abs() > 5.0).then_some((i, a.y, [a.x, b.x]))
+        })
+        .collect()
+}
+
+fn click_view_point(app: &mut App, view: &View, p: Point2) {
+    let at = session(app).screen_of(Point2::new(view.position.u + p.u, view.position.v + p.v));
+    click_at(app, at);
+}
+
+/// On a square aligned cut the second leg's Y-directed edges show along the sheet's X.
+/// The chamfer and centreline tools measure them as drawn, turned with the leg.
+#[test]
+fn aligned_section_line_tools_measure_the_turned_edges() {
+    let root = std::env::temp_dir().join(format!("soliddraft-aligned-lines-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(root.join("config")));
+    let doc = ledged_bracket();
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    app.run_steps(6);
+    drawing(&mut app, DrawingAction::MakeDrawing);
+    drawing(&mut app, DrawingAction::CreateDrawing);
+    settle(&mut app);
+    app.state_mut().state.options_details = true;
+    let top = view_named(&app, "Top view");
+
+    // A leg along -X to the bore's axis, then one along -Y that looks back at the flange.
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Section { replace: None }));
+    click_label(&mut app, "Aligned (turned)");
+    click_model(&mut app, top, Vec3::new(100.0, 45.0, 10.0));
+    click_model(&mut app, top, Vec3::new(70.5, 45.5, 10.0));
+    click_model(&mut app, top, Vec3::new(70.0, 15.0, 10.0));
+    place_right_of(&mut app, top, 220.0);
+    let made = sections(&app).pop().expect("an aligned section");
+    // The clicks land in single-precision screen coordinates: square the legs exactly.
+    let ViewKind::Section { parent, flip, label, model_line, hatch, .. } = made.kind.clone() else { unreachable!() };
+    let z = model_line[0].z;
+    let exact = vec![Vec3::new(100.0, 45.0, z), Vec3::new(70.0, 45.0, z), Vec3::new(70.0, 15.0, z)];
+    let xf = session(&app).doc.transforms[&top];
+    let line = exact.iter().map(|p| xf.point(*p)).collect();
+    let kind = ViewKind::Section { parent, line, flip, label, model_line: exact, hatch };
+    drawing(&mut app, DrawingAction::Command(DrawCommand::EditView { view: made.id, kind }));
+    settle(&mut app);
+    let section = view(&app, made.id);
+
+    // The flange top (z 60) and the ledge top (z 40): the two levels furthest from the
+    // cut plate.
+    let edges = level_edges(&section, 1);
+    let plate = section.geometry.hatch.iter().flat_map(|h| &h.outer).map(|p| p.v).sum::<f64>()
+        / section.geometry.hatch.iter().map(|h| h.outer.len()).sum::<usize>() as f64;
+    let mut levels: Vec<f64> = edges.iter().map(|e| e.1).collect();
+    levels.sort_by(|a, b| (b - plate).abs().total_cmp(&(a - plate).abs()));
+    levels.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    assert!(levels.len() >= 2, "the second leg draws the flange and ledge edges: {edges:?}");
+    let scale = soliddraft_drawing::project::view_scale(&session(&app).doc.drawing, made.id).unwrap();
+    near((levels[0] - levels[1]).abs(), 20.0 * scale, 1e-6, "flange top to ledge top");
+    let pick = |level: f64| *edges.iter().find(|e| (e.1 - level).abs() < 1e-6).expect("an edge at the level");
+    let (upper, lower) = (pick(levels[0]), pick(levels[1]));
+    let middle = |e: (usize, f64, [f64; 2])| Point2::new((e.2[0] + e.2[1]) / 2.0, e.1);
+
+    // A chamfer starts from a bevel seen at full length in the view.
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Chamfer));
+    click_view_point(&mut app, &section, middle(upper));
+    assert_eq!(session(&app).draft.anchors.len(), 2, "{:?}", session(&app).message);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
+
+    // A centreline halfway between the two levels.
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Centreline));
+    click_view_point(&mut app, &section, middle(upper));
+    click_view_point(&mut app, &section, middle(lower));
+    let s = session(&app);
+    let centreline = s
+        .doc
+        .drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.annotations)
+        .find(|a| a.view == made.id && matches!(a.body, AnnotationKind::Centreline))
+        .unwrap_or_else(|| panic!("a centreline: {:?}", s.message));
+    assert_eq!(centreline.anchors.len(), 4);
+    for (ends, edge) in centreline.anchors.chunks(2).zip([upper, lower]) {
+        assert!(ends.iter().all(|a| a.entity.section_leg == 1));
+        for end in ends {
+            near(end.cached.v, edge.1, 1e-6, "an end on its edge's level");
+        }
+        let drawn = (edge.2[0] - edge.2[1]).abs();
+        assert!((ends[0].cached.u - ends[1].cached.u).abs() >= drawn - 1e-6, "the whole edge, along the sheet's X");
+    }
+    drop(app);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// An offset section moved to a 1:2 sheet keeps its 1:1 parent's scale. Turning its
+/// horizontal dimension to aligned on a horizontal edge keeps the model length.
+#[test]
+fn a_dimension_on_a_section_from_another_sheet_keeps_its_length_when_turned_aligned() {
+    use soliddraft_drawing::measure::{Pick, propose};
+    use soliddraft_drawing::{Annotation, AnnotationState, Dimension, DimensionKind, LinearOrientation, Scale};
+    let root = std::env::temp_dir().join(format!("soliddraft-cross-sheet-dim-{}", std::process::id()));
+    let mut app = bracket_drawing(&root);
+    let top = view_named(&app, "Top view");
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Section { replace: None }));
+    click_label(&mut app, "Offset (stepped)");
+    click_model(&mut app, top, Vec3::new(25.0, 23.0, 10.0));
+    click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
+    click_label(&mut app, "Finish cutting line");
+    place_right_of(&mut app, top, 160.0);
+    let id = sections(&app).pop().expect("an offset section").id;
+    let parent = soliddraft_drawing::project::view_scale(&session(&app).doc.drawing, top).unwrap();
+    let other = if (parent - 0.5).abs() < 1e-9 { Scale::new(1, 1) } else { Scale::new(1, 2) };
+    drawing(&mut app, DrawingAction::AddSheet);
+    drawing(&mut app, DrawingAction::Command(DrawCommand::SetSheetScale { sheet: 1, scale: other }));
+    let to = Point2::new(200.0, 150.0);
+    drawing(&mut app, DrawingAction::Command(DrawCommand::MoveViewToSheet { view: id, sheet: 1, to }));
+    drawing(&mut app, DrawingAction::SetSheet(1));
+    settle(&mut app);
+    let s = session(&app);
+    assert_eq!(soliddraft_drawing::project::sheet_of(&s.doc.drawing, id), Some(1));
+    let scale = soliddraft_drawing::project::view_scale(&s.doc.drawing, id).unwrap();
+    near(scale, parent, 1e-12, "the section follows its parent on sheet 1");
+    assert!((s.doc.drawing.sheets[1].scale.factor() - scale).abs() > 1e-9);
+
+    // A horizontal dimension on the longest horizontal edge.
+    let moved = view(&app, id);
+    let (curve, _, ends) = level_edges(&moved, 0)
+        .into_iter()
+        .max_by(|a, b| (a.2[0] - a.2[1]).abs().total_cmp(&(b.2[0] - b.2[1]).abs()))
+        .expect("a horizontal edge");
+    let proposal = propose(&moved, &[Pick { view: id, curve, end: None }], &[]).expect("a proposal");
+    // The whole model edge, though the cut draws only its stretch.
+    let length = proposal.distance(LinearOrientation::Horizontal, scale);
+    assert!(length >= (ends[0] - ends[1]).abs() / scale - 1e-6, "{length}");
+    let dimension =
+        Dimension::measured(DimensionKind::Linear { orientation: LinearOrientation::Horizontal }, length, 1);
+    let annotation = Annotation {
+        id: session(&app).doc.drawing.next_annotation_id(),
+        view: id,
+        body: AnnotationKind::Dimension(dimension),
+        anchors: proposal.anchors,
+        placement: Point2::new(0.0, 20.0),
+        style: Default::default(),
+        state: AnnotationState::Ok,
+        source: None,
+    };
+    let dim = annotation.id;
+    drawing(&mut app, DrawingAction::Command(DrawCommand::AddDimension { annotation }));
+    drawing(&mut app, DrawingAction::Select(Some(DrawingSel::Annotation(dim))));
+    app.run_steps(4);
+    click_label(&mut app, "Aligned");
+    let after = session(&app).doc.drawing.annotation(dim).expect("the dimension").clone();
+    let AnnotationKind::Dimension(d) = &after.body else { panic!("a dimension") };
+    assert_eq!(d.kind, DimensionKind::Linear { orientation: LinearOrientation::Aligned });
+    let DimValue::Measured { value } = d.value else { panic!("a measured value: {:?}", d.value) };
+    near(value, length, 1e-6, "the aligned value is the edge's model length");
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
 }

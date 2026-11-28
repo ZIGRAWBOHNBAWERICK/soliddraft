@@ -1263,13 +1263,16 @@ pub(super) fn line_annotation_tool(
     };
     let part = ctx.part();
     let Ok(index) = PartIndex::build(&part) else { return };
+    // Where the view draws the edge: an aligned section turns its second leg's edges.
     let edge = |entity: &EntityRef| match index.resolve(entity) {
-        Resolution::Found(Entity::Edge(id)) => index.edge_curve(id),
+        Resolution::Found(Entity::Edge(id)) => {
+            index.edge_curve(id).map(|curve| xf.curve_on_leg(entity.section_leg, curve))
+        }
         _ => None,
     };
     let straight_ends = |curve: &soliddraft_drawing::Curve2| {
         let Some(Curve3::Line { a, b }) = edge(&curve.source) else { return None };
-        Some([*a, *b])
+        Some([a, b])
     };
     let anchors_of = |curve: &soliddraft_drawing::Curve2, [a, b]: [Vec3; 2]| {
         [(Attach::Start, a), (Attach::End, b)].map(|(attach, at)| Anchor {
@@ -1295,10 +1298,12 @@ pub(super) fn line_annotation_tool(
     let points = [first.cached, second.cached, ends[0].cached, ends[1].cached];
     if is_chamfer {
         let dimension = |ends: [Anchor; 2]| {
-            let geometry = [first, second, &ends[0], &ends[1]].map(|anchor| AnchorGeometry {
-                curve: edge(&anchor.entity),
-                point: anchor.entity.fingerprint.point,
-                attach: anchor.attach,
+            let anchors = [first, second, &ends[0], &ends[1]];
+            let curves = anchors.map(|anchor| edge(&anchor.entity));
+            let geometry: [AnchorGeometry<'_>; 4] = std::array::from_fn(|i| AnchorGeometry {
+                curve: curves[i].as_ref(),
+                point: xf.point_on_leg(anchors[i].entity.section_leg, anchors[i].entity.fingerprint.point),
+                attach: anchors[i].attach,
             });
             chamfer(&geometry, xf).map(|(size, angle)| (ends, size, angle))
         };

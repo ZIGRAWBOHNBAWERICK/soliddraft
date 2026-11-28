@@ -9,13 +9,16 @@
 //!   distance from the axis, and nothing at the pivot is drawn twice. Its inclined leg
 //!   draws from the display mesh until Catallax certifies inclined sections;
 //! - both survive a model edit and `draw --update`, reopen with their cutting lines, and
-//!   export with one DXF HATCH per cut region.
+//!   export with one DXF HATCH per cut region, its loops those of the region;
+//! - offset cuts through the flange's slot hatch the slot as a notch where a jog opens
+//!   it and as two separate regions where a cut crosses it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
 use soliddraft_drawing::{CurveKind, View, ViewKind};
+use soliddraft_kernel_api::Point2;
 
 fn recipes_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes")
@@ -137,12 +140,6 @@ fn assert_joint_drawn_once(view: &View, joint: f64) {
     }
 }
 
-fn hatch_count(dxf: &Path) -> usize {
-    let counts =
-        soliddraft_drawing::export::dxf::count_entities(&std::fs::read(dxf).unwrap()).expect("the DXF re-reads");
-    counts.get("HATCH/HATCH").copied().unwrap_or(0)
-}
-
 /// Sets `field` of recipe step `id` and writes the recipe back.
 fn edit_recipe(path: &Path, id: &str, field: &str, value: f64) {
     let mut v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -194,8 +191,8 @@ fn offset_section_through_staggered_bracket_holes() {
     near(cut_area(&section, scale), 1110.0 + 410.0, 1e-6, "cut area");
     // The jog at x = 70 lies 45 mm along the cut from hole 1.
     assert_joint_drawn_once(&section, first + (second - first) * 0.5);
-    // Exported with one HATCH per cut region, with the letter on the sheet.
-    assert_eq!(hatch_count(&dir.join("bracket.dxf")), section.geometry.hatch.len());
+    // Exported with one HATCH per cut region, loop for loop, with the letter on the sheet.
+    assert_dxf_hatches_match(&dir.join("bracket.dxf"), &section);
     let svg = std::fs::read_to_string(dir.join("bracket.svg")).unwrap();
     assert!(svg.contains(&format!(">SECTION {label}-{label}</text>")), "the section's caption");
     assert!(svg.contains(r#"<g id="HATCH""#) && svg.contains(r#"<g id="CUTTING""#));
@@ -216,7 +213,168 @@ fn offset_section_through_staggered_bracket_holes() {
     assert_eq!(kept, model_line, "the cut stays where it was on the part");
     near(cut_area(&after, scale), 1520.0 + 100.0, 1e-6, "cut area after the flange grew 10 mm");
     assert!(hole_cut_at(&after, 25.0, 23.0, 4.5).is_some() && hole_cut_at(&after, 115.0, 67.0, 4.5).is_some());
-    assert_eq!(hatch_count(&dir.join("after.dxf")), after.geometry.hatch.len());
+    assert_dxf_hatches_match(&dir.join("after.dxf"), &after);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A region's loops as corners in model millimetres: counterclockwise from the lowest,
+/// then leftmost, corner, with points along a straight side left out.
+fn corners(ring: &[(f64, f64)]) -> Vec<[f64; 2]> {
+    let n = ring.len();
+    let turns = |i: usize| {
+        let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+        ((b.0 - a.0) * (c.1 - b.1) - (b.1 - a.1) * (c.0 - b.0)).abs() > 1e-9
+    };
+    let mut out: Vec<(f64, f64)> = (0..n).filter(|&i| turns(i)).map(|i| ring[i]).collect();
+    let twice: f64 = (0..out.len())
+        .map(|i| {
+            let (a, b) = (out[i], out[(i + 1) % out.len()]);
+            a.0 * b.1 - b.0 * a.1
+        })
+        .sum();
+    if twice < 0.0 {
+        out.reverse();
+    }
+    let first = (0..out.len()).min_by(|&i, &j| out[i].1.total_cmp(&out[j].1).then(out[i].0.total_cmp(&out[j].0)));
+    out.rotate_left(first.unwrap_or(0));
+    out.into_iter().map(|(u, v)| [(u * 1e3).round() / 1e3, (v * 1e3).round() / 1e3]).collect()
+}
+
+/// The hatch regions of a section, outer loop first, as corners in model millimetres
+/// along the cut and up its depth, from the regions' lowest corner. The view may show
+/// either axis either way round, so each reading is tried; the one that matches
+/// `expected` is returned, or the first when none does.
+fn hatch_regions(regions: &[Vec<Vec<Point2>>], scale: f64, expected: &[Vec<Vec<[f64; 2]>>]) -> Vec<Vec<Vec<[f64; 2]>>> {
+    let all = regions.iter().flatten().flatten();
+    let (lo, hi) = all.fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(lo, hi), p| {
+        ([lo[0].min(p.u), lo[1].min(p.v)], [hi[0].max(p.u), hi[1].max(p.v)])
+    });
+    let extent = [(hi[0] - lo[0]) / scale, (hi[1] - lo[1]) / scale];
+    let mut first = None;
+    for reading in 0..8 {
+        let (swap, flip_a, flip_b) = (reading & 1 != 0, reading & 2 != 0, reading & 4 != 0);
+        let mut out: Vec<Vec<Vec<[f64; 2]>>> = regions
+            .iter()
+            .map(|loops| {
+                let mut loops: Vec<Vec<[f64; 2]>> = loops
+                    .iter()
+                    .map(|ring| {
+                        let points: Vec<(f64, f64)> = ring
+                            .iter()
+                            .map(|p| {
+                                let (u, v) = ((p.u - lo[0]) / scale, (p.v - lo[1]) / scale);
+                                let (eu, ev) = (extent[0], extent[1]);
+                                let (mut a, mut b, ea, eb) = if swap { (v, u, ev, eu) } else { (u, v, eu, ev) };
+                                if flip_a {
+                                    a = ea - a;
+                                }
+                                if flip_b {
+                                    b = eb - b;
+                                }
+                                (a, b)
+                            })
+                            .collect();
+                        corners(&points)
+                    })
+                    .collect();
+                if loops.len() > 1 {
+                    loops[1..].sort_by(|a, b| a.partial_cmp(b).unwrap());
+                }
+                loops
+            })
+            .collect();
+        out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if out == expected {
+            return out;
+        }
+        first.get_or_insert(out);
+    }
+    first.unwrap_or_default()
+}
+
+fn polygon_loops(view: &View) -> Vec<Vec<Vec<Point2>>> {
+    view.geometry.hatch.iter().map(|h| std::iter::once(&h.outer).chain(&h.holes).cloned().collect()).collect()
+}
+
+/// The DXF's HATCH boundaries are the view's hatch regions on the sheet, loop for loop:
+/// the outer boundary first and marked external, its holes after it.
+fn assert_dxf_hatches_match(dxf: &Path, view: &View) {
+    let read = soliddraft_drawing::export::dxf::hatch_loops(&std::fs::read(dxf).unwrap()).expect("the DXF re-reads");
+    let o = view.position;
+    let mut left: Vec<Vec<Vec<Point2>>> = polygon_loops(view)
+        .into_iter()
+        .map(|loops| loops.into_iter().map(|r| r.iter().map(|p| Point2::new(p.u + o.u, p.v + o.v)).collect()).collect())
+        .collect();
+    assert_eq!(read.len(), left.len(), "one HATCH per cut region");
+    for hatch in read {
+        let flags: Vec<bool> = hatch.iter().map(|(external, _)| *external).collect();
+        assert!(flags.first() == Some(&true) && flags[1..].iter().all(|f| !f), "external loop first: {flags:?}");
+        let loops: Vec<Vec<Point2>> = hatch.into_iter().map(|(_, points)| points).collect();
+        let same = |a: &Vec<Vec<Point2>>| {
+            a.len() == loops.len()
+                && a.iter().zip(&loops).all(|(x, y)| {
+                    x.len() == y.len()
+                        && x.iter().zip(y).all(|(p, q)| (p.u - q.u).abs() < 1e-5 && (p.v - q.v).abs() < 1e-5)
+                })
+        };
+        let at = left.iter().position(same).unwrap_or_else(|| panic!("a HATCH matches no cut region: {loops:?}"));
+        left.remove(at);
+    }
+}
+
+/// Offset sections through the flange's 40 x 12 slot, whose cut at x = 5 is the flange
+/// (90 x 60 along the cut and up) with the slot (y 25 to 65, z 25 to 37) as a hole. A
+/// jog at y = 45 opens the slot into a notch in the first cut's outline; a middle cut
+/// from y = 30 to 50 leaves the material above and below the slot as two separate
+/// regions. The plate (10 deep) is cut at x = 50.
+#[test]
+fn offset_cuts_through_the_flange_slot_hatch_notches_and_islands() {
+    let dir = scratch("offset-slot", "bracket.json");
+    let rect = |s0: f64, s1: f64, z0: f64, z1: f64| vec![vec![[s0, z0], [s1, z0], [s1, z1], [s0, z1]]];
+    let cases = [
+        (
+            "notch",
+            "top:5,0,10;5,45,10;50,45,10;50,90,10",
+            4,
+            vec![
+                vec![vec![
+                    [0.0, 0.0],
+                    [45.0, 0.0],
+                    [45.0, 25.0],
+                    [25.0, 25.0],
+                    [25.0, 37.0],
+                    [45.0, 37.0],
+                    [45.0, 60.0],
+                    [0.0, 60.0],
+                ]],
+                rect(45.0, 90.0, 0.0, 10.0),
+            ],
+        ),
+        (
+            "islands",
+            "top:50,0,10;50,30,10;5,30,10;5,50,10;50,50,10;50,90,10",
+            6,
+            vec![
+                rect(0.0, 30.0, 0.0, 10.0),
+                rect(30.0, 50.0, 0.0, 25.0),
+                rect(30.0, 50.0, 37.0, 60.0),
+                rect(50.0, 90.0, 0.0, 10.0),
+            ],
+        ),
+    ];
+    for (name, through, points, mut expected) in cases {
+        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let drawing = format!("{name}.dwdrw");
+        let dxf = format!("{name}.dxf");
+        let args =
+            ["draw", "bracket.json", "--offset-section", through, "--out", drawing.as_str(), "--out", dxf.as_str()];
+        soliddraft(&dir, &args);
+        let (section, scale) = bent_section(&dir.join(&drawing), points);
+        assert!(section.has_saved_catallax_linework(), "{name}");
+        let regions = hatch_regions(&polygon_loops(&section), scale, &expected);
+        assert_eq!(regions, expected, "{name}: the hatch regions along the cut and up");
+        assert_dxf_hatches_match(&dir.join(&dxf), &section);
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

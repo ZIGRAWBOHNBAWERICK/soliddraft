@@ -344,11 +344,7 @@ fn collect(drawing: &Drawing, report: &mut UpdateReport) {
 }
 
 fn resolve_anchor(index: &PartIndex, ctx: &ViewContext, anchor: &crate::Anchor) -> Resolution {
-    let leg = anchor.entity.section_leg;
-    if leg != 0 && ctx.xf.leg_turn(leg).is_none() {
-        return Resolution::Lost("The aligned cut leg is missing".into());
-    }
-    index.resolve(&anchor.entity)
+    project::resolve_in_view(index, ctx, &anchor.entity)
 }
 
 /// Re-resolves one annotation; returns the change when its displayed value moved.

@@ -677,7 +677,8 @@ fn annotation_panel(
     } else {
         sheet.view(a.view).map(|v| view_label_in(&s.doc.drawing, &sheet, v)).unwrap_or_default()
     };
-    let scale = sheet.view(a.view).map(|v| soliddraft_drawing::project::effective_scale(&sheet, v)).unwrap_or(1.0);
+    // The view's scale follows a parent on any sheet.
+    let scale = soliddraft_drawing::project::view_scale(&s.doc.drawing, a.view).unwrap_or(1.0);
     let _ = scale;
     egui::ScrollArea::vertical().id_salt("annotation_pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {

@@ -18,11 +18,9 @@ const ANGLE_TOL: f64 = 1e-9;
 /// it.
 const BOUNDARY_TOL: f64 = 1e-9;
 
-/// What a cutting line is, by its number of points.
+/// What a bent cutting line is, by its number of points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CutKind {
-    /// Two points: one plane.
-    Straight,
     /// An even number of points from four: parallel cuts joined by perpendicular jogs.
     Offset,
     /// Three points: two cuts meeting at the middle point, the second revolved into the
@@ -31,11 +29,11 @@ pub(crate) enum CutKind {
 }
 
 impl CutKind {
-    /// Two points make a straight cut, three an aligned cut about the middle point, and
-    /// an even number from four an offset cut.
+    /// Three points make an aligned cut about the middle point and an even number from
+    /// four an offset cut. Any other count, a straight line's two included, is not a bent
+    /// cut.
     pub(crate) fn of(points: usize) -> Option<CutKind> {
         match points {
-            2 => Some(CutKind::Straight),
             3 => Some(CutKind::Aligned),
             n if n >= 4 && n.is_multiple_of(2) => Some(CutKind::Offset),
             _ => None,
@@ -93,8 +91,8 @@ impl CutPath {
     /// arrows round, as for a straight section.
     pub(crate) fn of_line(trace: &[Point2], flip: bool) -> Result<Self, CutPathError> {
         match CutKind::of(trace.len()) {
-            Some(kind @ (CutKind::Offset | CutKind::Aligned)) => Self::new(kind, trace, flip),
-            _ => Err(CutPathError::PointCount),
+            Some(kind) => Self::new(kind, trace, flip),
+            None => Err(CutPathError::PointCount),
         }
     }
 
@@ -553,7 +551,7 @@ mod tests {
 
     #[test]
     fn point_counts_name_the_kind_of_cut() {
-        assert_eq!(CutKind::of(2), Some(CutKind::Straight));
+        assert_eq!(CutKind::of(2), None);
         assert_eq!(CutKind::of(3), Some(CutKind::Aligned));
         assert_eq!(CutKind::of(4), Some(CutKind::Offset));
         assert_eq!(CutKind::of(6), Some(CutKind::Offset));

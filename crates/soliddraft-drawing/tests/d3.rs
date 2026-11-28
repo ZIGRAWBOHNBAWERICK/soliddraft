@@ -1257,6 +1257,79 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
     let ann = drawing.annotation(annotation_id).unwrap();
     assert!(ann.anchors.iter().all(|anchor| anchor.entity.section_leg == 1));
     assert!(matches!(&ann.body, AnnotationKind::Dimension(d) if d.value == DimValue::Measured { value: 100.0 }));
+
+    // Turned the other way, the second leg keeps the other side of the block: the edge
+    // the dimension measures is cut away there, though the part still has it.
+    let leg_edge = ann.anchors[0].entity.clone();
+    let mut kind = drawing.view(id).unwrap().kind.clone();
+    let ViewKind::Section { flip, .. } = &mut kind else { panic!("a section") };
+    *flip = !*flip;
+    soliddraft_drawing::apply_with(&mut drawing, &Command::EditView { view: id, kind }, &part).unwrap();
+    let on_second_leg = |d: &Drawing| {
+        d.view(id).unwrap().geometry.curves.iter().any(|c| {
+            c.kind == soliddraft_drawing::CurveKind::Edge
+                && c.source.kernel_hint == leg_edge.kernel_hint
+                && c.source.section_leg == 1
+        })
+    };
+    assert!(!on_second_leg(&drawing), "the flipped second leg no longer draws the edge");
+    let ann = drawing.annotation(annotation_id).unwrap();
+    assert!(matches!(&ann.state, AnnotationState::Dangling { lost, .. } if lost == &[0, 1]), "{:?}", ann.state);
+    // Neither a repair nor a new auxiliary view takes the edge from that leg.
+    let repair = soliddraft_drawing::apply_with(
+        &mut drawing,
+        &Command::Reattach { annotation: annotation_id, end: 0, entity: leg_edge.clone() },
+        &part,
+    );
+    assert!(repair.is_err(), "{repair:?}");
+    assert!(matches!(&drawing.annotation(annotation_id).unwrap().state, AnnotationState::Dangling { .. }));
+    let auxiliary = derived::new_auxiliary(&drawing, &part, &index, 0, id, leg_edge.clone(), false, None);
+    assert!(
+        matches!(auxiliary, Err(soliddraft_drawing::DrawingError::LostReference(_))),
+        "{:?}",
+        auxiliary.map(|(view, _)| view.kind)
+    );
+}
+
+#[test]
+fn a_hole_table_tags_holes_at_its_views_scale_when_the_parent_is_on_another_sheet() {
+    let kernel = BoxKernel::new();
+    let part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let mut d = drawing(&part);
+    let index = PartIndex::build(&part).unwrap();
+    let mut stack = UndoStack::new();
+    run(&mut stack, &mut d, &part, Command::SetSheetScale { sheet: 0, scale: soliddraft_drawing::Scale::FULL });
+    run(&mut stack, &mut d, &part, Command::AddSheet { name: "Details".into(), template: "iso-a3".into() });
+    run(&mut stack, &mut d, &part, Command::SetSheetScale { sheet: 1, scale: soliddraft_drawing::Scale::new(1, 5) });
+    let (view, _) =
+        derived::new_detail(&d, &part, &index, 1, FRONT, Point2::new(0.0, 0.0), 10.0, Vec::new(), 2.0, None).unwrap();
+    let id = view.id;
+    run(&mut stack, &mut d, &part, Command::PlaceView { sheet: 1, view });
+    // The detail magnifies its parent on sheet 1, not the sheet it is on.
+    let scale = project::view_scale(&d, id).unwrap();
+    assert!((scale - 2.0 * project::view_scale(&d, FRONT).unwrap()).abs() < 1e-12, "{scale}");
+    assert!((scale - 0.4).abs() > 1e-9, "{scale}");
+    let row = soliddraft_drawing::HoleRow {
+        coordinates: Point2::new(0.0, 0.0),
+        centre: Point2::new(3.0, -2.0),
+        diameter: 4.0,
+    };
+    let table = soliddraft_drawing::Table::hole(Point2::new(30.0, 30.0), id, vec![row]);
+    run(&mut stack, &mut d, &part, Command::AddTable { sheet: 1, table });
+    let position = d.view(id).unwrap().position;
+    let expected = Point2::new(position.u + (3.0 + 2.0) * scale + 1.0, position.v - 2.0 * scale + 1.0);
+    let tags: Vec<Point2> = layout_sheet(&d, 1)
+        .items
+        .into_iter()
+        .filter_map(|i| match i {
+            Item::Text(t) if t.text == "A1" => Some(t.pos),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        tags.iter().any(|p| (p.u - expected.u).abs() < 1e-9 && (p.v - expected.v).abs() < 1e-9),
+        "the tag sits beside the hole at {expected:?}: {tags:?}"
+    );
 }
 
 #[test]

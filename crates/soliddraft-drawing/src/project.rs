@@ -130,6 +130,17 @@ impl ViewTransform {
         if leg == 1 { self.aligned_turn } else { None }
     }
 
+    /// A model curve where the view draws it from aligned section leg `leg`: the second
+    /// leg's curves turned into the first leg's plane, others as they are.
+    pub fn curve_on_leg(&self, leg: u8, curve: &Curve3) -> Curve3 {
+        self.leg_turn(leg).map_or_else(|| curve.clone(), |turn| turn.curve(curve))
+    }
+
+    /// A model point where the view draws it from aligned section leg `leg`.
+    pub fn point_on_leg(&self, leg: u8, p: Vec3) -> Vec3 {
+        self.leg_turn(leg).map_or(p, |turn| turn.point(p))
+    }
+
     /// A transform with no breaks.
     pub fn new(frame: ViewFrame, scale: f64, centre: Point2) -> ViewTransform {
         ViewTransform { frame, scale, centre, breaks: Breaks::default(), aligned_turn: None }
@@ -1065,7 +1076,7 @@ fn auxiliary_axes(
     edge: &EntityRef,
     flip: bool,
 ) -> Result<(Vec3, Vec3), DrawingError> {
-    let id = match index.resolve(edge) {
+    let id = match resolve_in_view(index, pctx, edge) {
         Resolution::Found(Entity::Edge(id)) => id,
         Resolution::Found(_) => return Err(DrawingError::BadRequest("an auxiliary view needs an edge".into())),
         Resolution::Lost(why) => return Err(DrawingError::LostReference(why)),
@@ -1088,6 +1099,31 @@ fn auxiliary_axes(
         eye = Point2::new(-eye.u, -eye.v);
     }
     Ok(fold_about(&pctx.xf.frame, axis, eye))
+}
+
+/// Resolves a reference picked in the view `ctx`. On an aligned section it must still
+/// be drawn on the leg it was picked from: turning the cut round can take an edge off
+/// that leg while the part keeps it.
+pub(crate) fn resolve_in_view(index: &PartIndex, ctx: &ViewContext, entity: &EntityRef) -> Resolution {
+    let leg = entity.section_leg;
+    if leg != 0 && ctx.xf.leg_turn(leg).is_none() {
+        return Resolution::Lost("The aligned cut leg is missing".into());
+    }
+    let found = index.resolve(entity);
+    if let Resolution::Found(e) = &found
+        && ctx.xf.aligned_turn.is_some()
+        && let Some(r) = index.entity_ref(*e)
+        && let Some(hint) = r.kernel_hint
+        && !ctx
+            .projected
+            .geometry
+            .curves
+            .iter()
+            .any(|c| c.source.kind == r.kind && c.source.kernel_hint == Some(hint) && c.source.section_leg == leg)
+    {
+        return Resolution::Lost("The reference is no longer on its leg of the aligned cut".into());
+    }
+    found
 }
 
 /// The direction towards the eye and the up vector of a view folded off a parent with
@@ -1823,6 +1859,87 @@ mod tests {
 
     fn same(a: Vec3, b: Vec3) -> bool {
         a.distance(b) < 1e-12
+    }
+
+    fn ring(points: &[[f64; 2]]) -> Vec<Point2> {
+        points.iter().copied().map(Point2::from).collect()
+    }
+
+    /// A ring's corners counterclockwise from its lowest, then leftmost, corner, with
+    /// points along a straight side left out.
+    fn corners(ring: &[Point2]) -> Vec<[f64; 2]> {
+        let n = ring.len();
+        let mut out: Vec<Point2> = (0..n)
+            .filter(|&i| {
+                let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+                ((b.u - a.u) * (c.v - b.v) - (b.v - a.v) * (c.u - b.u)).abs() > 1e-9
+            })
+            .map(|i| ring[i])
+            .collect();
+        let twice: f64 = (0..out.len())
+            .map(|i| {
+                let (a, b) = (out[i], out[(i + 1) % out.len()]);
+                a.u * b.v - b.u * a.v
+            })
+            .sum();
+        if twice < 0.0 {
+            out.reverse();
+        }
+        let first = (0..out.len())
+            .min_by(|&i, &j| out[i].v.total_cmp(&out[j].v).then(out[i].u.total_cmp(&out[j].u)))
+            .unwrap_or(0);
+        out.rotate_left(first);
+        out.into_iter().map(|p| [(p.u * 1e6).round() / 1e6, (p.v * 1e6).round() / 1e6]).collect()
+    }
+
+    fn square_with_hole(hole: [[f64; 2]; 2]) -> Polygon {
+        let [[u0, v0], [u1, v1]] = hole;
+        Polygon {
+            outer: ring(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]),
+            holes: vec![ring(&[[u0, v0], [u0, v1], [u1, v1], [u1, v0]])],
+            clip: None,
+            approximate: false,
+        }
+    }
+
+    #[test]
+    fn a_hole_the_clip_opens_becomes_a_notch_in_the_outer_boundary() {
+        let window = ring(&[[-100.0, -100.0], [5.0, -100.0], [5.0, 100.0], [-100.0, 100.0]]);
+        let clipped = clip_polygon_region(square_with_hole([[4.0, 4.0], [6.0, 6.0]]), &window, true);
+        let [only] = &clipped[..] else { panic!("one region: {clipped:?}") };
+        assert!(only.holes.is_empty(), "the opened hole is no longer a hole: {only:?}");
+        assert_eq!(
+            corners(&only.outer),
+            [[0.0, 0.0], [5.0, 0.0], [5.0, 4.0], [4.0, 4.0], [4.0, 6.0], [5.0, 6.0], [5.0, 10.0], [0.0, 10.0]]
+        );
+    }
+
+    #[test]
+    fn a_clip_across_a_hole_leaves_separate_islands() {
+        let window = ring(&[[4.0, -100.0], [6.0, -100.0], [6.0, 100.0], [4.0, 100.0]]);
+        let clipped = clip_polygon_region(square_with_hole([[2.0, 3.0], [8.0, 7.0]]), &window, true);
+        let mut islands: Vec<Vec<[f64; 2]>> = clipped
+            .iter()
+            .map(|p| {
+                assert!(p.holes.is_empty(), "{p:?}");
+                corners(&p.outer)
+            })
+            .collect();
+        islands.sort_by(|a, b| a[0][1].total_cmp(&b[0][1]));
+        assert_eq!(
+            islands,
+            [
+                vec![[4.0, 0.0], [6.0, 0.0], [6.0, 3.0], [4.0, 3.0]],
+                vec![[4.0, 7.0], [6.0, 7.0], [6.0, 10.0], [4.0, 10.0]]
+            ]
+        );
+        // A hole wholly inside the window stays a hole.
+        let inside = ring(&[[-100.0, -100.0], [100.0, -100.0], [100.0, 100.0], [-100.0, 100.0]]);
+        let clipped = clip_polygon_region(square_with_hole([[2.0, 3.0], [8.0, 7.0]]), &inside, true);
+        let [whole] = &clipped[..] else { panic!("one region: {clipped:?}") };
+        assert_eq!(corners(&whole.outer), [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]);
+        let [hole] = &whole.holes[..] else { panic!("one hole: {whole:?}") };
+        assert_eq!(corners(hole), [[2.0, 3.0], [8.0, 3.0], [8.0, 7.0], [2.0, 7.0]]);
     }
 
     #[test]

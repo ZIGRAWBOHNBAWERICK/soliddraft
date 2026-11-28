@@ -10,8 +10,8 @@ use crate::theme;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_drawing::display::annotation_name;
 use soliddraft_drawing::display::scale_text;
-use soliddraft_drawing::project::effective_scale;
 use soliddraft_drawing::project::view_label_in;
+use soliddraft_drawing::project::{effective_scale, view_scale};
 use soliddraft_drawing::{AnnotationKind, AnnotationState, Command, Projection, ViewId, ViewKind, ViewScale};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -308,7 +308,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 let update_reason = s.doc.view_update_reason(v);
                 // A derived view's scale and its location on another sheet.
                 let mut sub = String::new();
-                let own = effective_scale(sheet, v);
+                let own = view_scale(&s.doc.drawing, v.id).unwrap_or_else(|_| effective_scale(sheet, v));
                 if matches!(v.kind, ViewKind::Detail { .. })
                     || (v.scale != ViewScale::Sheet && (own - sheet.scale.factor()).abs() > 1e-9)
                 {

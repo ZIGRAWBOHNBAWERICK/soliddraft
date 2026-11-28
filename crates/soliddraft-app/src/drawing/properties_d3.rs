@@ -12,7 +12,7 @@ use crate::theme;
 use egui::{Rect, pos2, vec2};
 use soliddraft_drawing::display::{self, scale_text};
 use soliddraft_drawing::library;
-use soliddraft_drawing::project::effective_scale;
+use soliddraft_drawing::project::{effective_scale, view_scale};
 use soliddraft_drawing::{
     AnnotationKind, Command, DatumRef, GdtCharacteristic, HalfSection, Lay, LinearOrientation, MaterialCondition,
     RevisionRow, SetKind, SurfaceProcess, TableKind, View, ViewId, ViewKind, ViewScale, next_letter,
@@ -241,11 +241,8 @@ fn detail_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
         );
         section_gap(ui);
         theme::section_label(ui, "Scale");
-        let parent_scale = s
-            .draft
-            .view
-            .and_then(|v| s.doc.drawing.sheet_of(v).and_then(|sh| sh.view(v).map(|vw| effective_scale(sh, vw))))
-            .unwrap_or(s.sheet().scale.factor());
+        let parent_scale =
+            s.draft.view.and_then(|v| view_scale(&s.doc.drawing, v).ok()).unwrap_or(s.sheet().scale.factor());
         for f in [2.0, 3.0, 4.0, 5.0] {
             let tag = scale_text(parent_scale * f);
             if choice(ui, (s.draft.factor - f).abs() < 1e-9, &format!("{f}× the parent"), Some(&tag)) {
@@ -670,9 +667,11 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
                 };
                 actions.push(DrawingAction::Command(Command::EditView { view: id, kind }));
             }
-            let cut = match (line.first(), line.last()) {
-                (Some(a), Some(b)) if (a.v - b.v).abs() < 1e-6 => format!("horizontal at y {:.1}", a.v),
-                (Some(a), _) => format!("vertical at x {:.1}", a.u),
+            let cut = match (line.len(), line.first(), line.last()) {
+                (3, ..) => "aligned, 2 legs about a pivot".to_owned(),
+                (n, ..) if n >= 4 => format!("offset, {} parallel cuts", n / 2),
+                (_, Some(a), Some(b)) if (a.v - b.v).abs() < 1e-6 => format!("horizontal at y {:.1}", a.v),
+                (_, Some(a), _) => format!("vertical at x {:.1}", a.u),
                 _ => "none".into(),
             };
             value_row(ui, "Cut", &cut);
@@ -747,8 +746,9 @@ pub fn view_extras(ui: &mut egui::Ui, s: &DrawingSession, v: &View, actions: &mu
                     }
                 });
             }
-            let parent_scale = sheet.view(*parent).map(|p| effective_scale(sheet, p)).unwrap_or(sheet.scale.factor());
-            let own = effective_scale(sheet, v);
+            // Either view may follow a parent on another sheet.
+            let parent_scale = view_scale(&s.doc.drawing, *parent).unwrap_or(sheet.scale.factor());
+            let own = view_scale(&s.doc.drawing, id).unwrap_or_else(|_| effective_scale(sheet, v));
             let mag = own / parent_scale;
             labelled(ui, "Magnify", |ui| {
                 for f in [2.0, 3.0, 4.0, 5.0] {

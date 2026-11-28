@@ -389,39 +389,13 @@ impl ViewContext {
         curve: &Curve3,
         preferred: Vec3,
     ) -> Option<Vec3> {
-        use kurbo::ParamCurveNearest as _;
         let xf = self.xf.in_leg(leg);
-        let preferred = xf.precise_point(preferred);
-        let q = Point::new(preferred.u, preferred.v);
-        let p = self
-            .projected_edges(edge, leg)
-            .flat_map(|c| c.path.segments())
-            .map(|s| {
-                let nearest = s.nearest(q, 1e-6);
-                (nearest.distance_sq, s.eval(nearest.t))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))?
-            .1;
-        let model = xf.unproject(Point2::new(p.x, p.y));
-        let samples = curve.sample_params(1e-4);
-        let (_, t) = samples
-            .windows(2)
-            .filter_map(|pair| {
-                let [(lo, a), (hi, b)] = pair else { return None };
-                let ab = *b - *a;
-                let planar = ab - xf.frame.direction * ab.dot(xf.frame.direction);
-                let length = planar.dot(planar);
-                if length <= 1e-12 {
-                    return None;
-                }
-                let offset = model - *a;
-                let f = (offset.dot(planar) / length).clamp(0.0, 1.0);
-                let residual = offset - planar * f;
-                let residual = residual - xf.frame.direction * residual.dot(xf.frame.direction);
-                Some((residual.dot(residual), lo + (hi - lo) * f))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))?;
-        Some(curve.point_at(t))
+        point_on_drawn_edge(
+            &xf,
+            curve,
+            xf.precise_point(preferred),
+            self.projected_edges(edge, leg).flat_map(|c| c.path.segments()),
+        )
     }
 
     /// The kernel request the view was made with.
@@ -440,6 +414,43 @@ pub fn compute_in(
     memo: &mut Contexts,
 ) -> Result<(), DrawingError> {
     compute_with_previous(drawing, part, index, id, memo, None)
+}
+
+pub(crate) fn point_on_drawn_edge(
+    xf: &ViewTransform,
+    curve: &Curve3,
+    preferred: Point2,
+    segments: impl Iterator<Item = kurbo::PathSeg>,
+) -> Option<Vec3> {
+    use kurbo::ParamCurveNearest as _;
+    let q = Point::new(preferred.u, preferred.v);
+    let p = segments
+        .map(|s| {
+            let nearest = s.nearest(q, 1e-6);
+            (nearest.distance_sq, s.eval(nearest.t))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))?
+        .1;
+    let model = xf.unproject(Point2::new(p.x, p.y));
+    let samples = curve.sample_params(1e-4);
+    let (_, t) = samples
+        .windows(2)
+        .filter_map(|pair| {
+            let [(lo, a), (hi, b)] = pair else { return None };
+            let ab = *b - *a;
+            let planar = ab - xf.frame.direction * ab.dot(xf.frame.direction);
+            let length = planar.dot(planar);
+            if length <= 1e-12 {
+                return None;
+            }
+            let offset = model - *a;
+            let f = (offset.dot(planar) / length).clamp(0.0, 1.0);
+            let residual = offset - planar * f;
+            let residual = residual - xf.frame.direction * residual.dot(xf.frame.direction);
+            Some((residual.dot(residual), lo + (hi - lo) * f))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))?;
+    Some(curve.point_at(t))
 }
 
 pub(crate) fn compute_with_previous(
@@ -692,6 +703,7 @@ fn compute_view_at(
                 coarse: parent.geometry.coarse,
                 breaks: Vec::new(),
                 symmetry_segments: Vec::new(),
+                symmetry_bounds: None,
             };
             let mut projected = Projected { geometry, transform: xf, circles };
             // Magnified and rounded, an end on the callout can land a hair outside the
@@ -744,7 +756,9 @@ fn compute_view_at(
     ctx.projected.geometry.breaks = ctx.xf.gaps();
     validate_break(&ctx.projected.geometry, display, 1.0, projection.is_none() && !view.breaks.is_empty())?;
     if let Some(half) = &view.half {
-        ctx.projected.geometry.symmetry_segments = symmetry_line(&ctx, half, crop.as_ref());
+        let bounds = ctx.curves.bbox_2d;
+        ctx.projected.geometry.symmetry_bounds = Some(bounds);
+        ctx.projected.geometry.symmetry_segments = symmetry_line(&ctx.xf, bounds, half, crop.as_ref());
     }
     Ok(ctx)
 }
@@ -851,8 +865,13 @@ const SYMMETRY_OVERRUN: f64 = 3.0;
 /// A half section's symmetry line across the view's line work, cut to the view's crop
 /// and to its break, each end away from the break [`SYMMETRY_OVERRUN`] past the line
 /// work.
-fn symmetry_line(ctx: &ViewContext, half: &HalfSection, crop: Option<&Boundary>) -> Vec<[Point2; 2]> {
-    let flat = ctx.xf.unbroken();
+fn symmetry_line(
+    xf: &ViewTransform,
+    bounds: [f64; 4],
+    half: &HalfSection,
+    crop: Option<&Boundary>,
+) -> Vec<[Point2; 2]> {
+    let flat = xf.unbroken();
     let (a, b) = (flat.precise_point(half.axis[0]), flat.precise_point(half.axis[1]));
     let (du, dv) = (b.u - a.u, b.v - a.v);
     let len = du.hypot(dv);
@@ -860,14 +879,14 @@ fn symmetry_line(ctx: &ViewContext, half: &HalfSection, crop: Option<&Boundary>)
         return Vec::new();
     }
     let (du, dv) = (du / len, dv / len);
-    let [x0, y0, x1, y1] = flat.bounds(ctx.curves.bbox_2d);
+    let [x0, y0, x1, y1] = flat.bounds(bounds);
     let along = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(u, v)| (u - a.u) * du + (v - a.v) * dv);
     let lo = along.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = along.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let at = |t: f64| Point2::new(round(a.u + du * t), round(a.v + dv * t));
     let axis = Curve3::Line { a: flat.unproject(at(lo)), b: flat.unproject(at(hi)) };
-    let path = path_of(&axis, &ctx.xf);
-    let gap = ctx.xf.gaps().first().copied();
+    let path = path_of(&axis, xf);
+    let gap = xf.gaps().first().copied();
     clip_symmetry(
         path.segments().filter_map(|segment| {
             let [p, q] = [segment.start(), segment.end()].map(|p| Point2::new(p.x, p.y));
@@ -1569,6 +1588,7 @@ fn project_curves(
         coarse,
         breaks: Vec::new(),
         symmetry_segments: Vec::new(),
+        symmetry_bounds: None,
     };
     Projected { geometry, transform: *xf, circles }
 }
@@ -2016,7 +2036,14 @@ pub fn rescale_view(view: &mut View, ratio: f64) {
     if let Some(c) = &mut view.crop {
         *c = scaled_boundary(c, ratio, gap);
     }
+    let symmetry = view.half.as_ref().zip(view.geometry.symmetry_bounds);
+    if symmetry.is_some() && view.geometry.transform.is_some() {
+        view.geometry.symmetry_segments.clear();
+    }
     rescale_geometry(&mut view.geometry, ratio, view.crop.as_ref());
+    if let Some(((half, bounds), xf)) = symmetry.zip(view.geometry.transform) {
+        view.geometry.symmetry_segments = symmetry_line(&xf, bounds, half, view.crop.as_ref());
+    }
     for b in &mut view.broken_out {
         b.boundary = scaled_boundary(&b.boundary, ratio, gap);
     }

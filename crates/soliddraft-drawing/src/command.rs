@@ -621,12 +621,52 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                     outside.join(", ")
                 )));
             }
-            let s = sheet_mut(drawing, *sheet)?;
+            let smaller = model.size.width_mm < s.size.width_mm || model.size.height_mm < s.size.height_mm;
+            let mut staged = drawing.clone();
+            let s = sheet_mut(&mut staged, *sheet)?;
             s.template = template.clone();
             s.size = model.size;
             s.zones = model.zones;
             // Cells placed for another block's fields go; the new block's own cells stand.
             s.title_layout.retain(|key, cell| format.title_block.fields.iter().any(|f| &f.key == key && cell.fits(f)));
+            if smaller {
+                let list = crate::display::layout_sheet(&staged, *sheet);
+                let mut outside = Vec::new();
+                for item in list.sheet_items() {
+                    use crate::display::Owner;
+                    let bounds = item.bounds();
+                    if bounds.x0 >= -1e-6
+                        && bounds.y0 >= -1e-6
+                        && bounds.x1 <= list.paper.0 + 1e-6
+                        && bounds.y1 <= list.paper.1 + 1e-6
+                    {
+                        continue;
+                    }
+                    let label = match item.owner() {
+                        Owner::Sheet => continue,
+                        Owner::View(id) | Owner::Curve(id, _) => {
+                            let s = staged.sheet_of(id).expect("drawn view's sheet");
+                            project::view_label_in(&staged, s, s.view(id).expect("drawn view"))
+                        }
+                        Owner::Annotation(id) | Owner::AnnotationEnd(id, _) => format!("annotation {id}"),
+                        Owner::Table(i) => match staged.sheets[*sheet].tables[i].kind {
+                            crate::TableKind::Revision => "revision table".into(),
+                            crate::TableKind::Hole => "hole table".into(),
+                            crate::TableKind::Bom => "bill of materials".into(),
+                        },
+                    };
+                    if !outside.contains(&label) {
+                        outside.push(label);
+                    }
+                }
+                if !outside.is_empty() {
+                    return Err(DrawingError::BadRequest(format!(
+                        "Move or rescale these items before changing the paper size: {}",
+                        outside.join(", ")
+                    )));
+                }
+            }
+            drawing.sheets[*sheet] = staged.sheets.swap_remove(*sheet);
             Ok(())
         }
         Command::SetTitleLayout { sheet, key, layout } => {

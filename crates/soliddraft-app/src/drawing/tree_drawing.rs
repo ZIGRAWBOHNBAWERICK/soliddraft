@@ -92,6 +92,32 @@ fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     }
 }
 
+fn view_dot<'a>(
+    view: &soliddraft_drawing::View,
+    update_reason: Option<&str>,
+    annotations: impl Iterator<Item = &'a soliddraft_drawing::Annotation>,
+) -> Dot {
+    if !view.is_printed() {
+        return Dot::None;
+    }
+    if update_reason.is_some() {
+        return Dot::Warn;
+    }
+    let worst = annotations
+        .map(|a| match a.state {
+            AnnotationState::Ok => 0,
+            AnnotationState::Changed { .. } => 1,
+            AnnotationState::Dangling { .. } => 2,
+        })
+        .max()
+        .unwrap_or(0);
+    match worst {
+        2 => Dot::Error,
+        1 => Dot::Warn,
+        _ => Dot::Ok,
+    }
+}
+
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(s) = state.drawing.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
@@ -326,26 +352,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ViewKind::Auxiliary { .. } => Icon::Plane,
                     _ => Icon::Display,
                 };
-                let dot = if !v.is_printed() {
-                    Dot::Ok
-                } else if update_reason.is_some() {
-                    Dot::Warn
-                } else {
-                    let worst = sheet
-                        .annotations_of(id)
-                        .map(|a| match a.state {
-                            AnnotationState::Ok => 0,
-                            AnnotationState::Changed { .. } => 1,
-                            AnnotationState::Dangling { .. } => 2,
-                        })
-                        .max()
-                        .unwrap_or(0);
-                    match worst {
-                        2 => Dot::Error,
-                        1 => Dot::Warn,
-                        _ => Dot::Ok,
-                    }
-                };
+                let dot = view_dot(v, update_reason, sheet.annotations_of(id));
                 let open = s.expanded.contains(&id) || depth == 2;
                 let r = row(
                     ui,
@@ -562,5 +569,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     });
     for a in actions {
         state.push(AppAction::Drawing(a));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fallback_view_has_no_status_dot() {
+        let drawing = soliddraft_drawing::fixture::bracket_a3();
+        let sheet = &drawing.sheets[0];
+        let mut view = sheet.views[0].clone();
+        assert!(view_dot(&view, None, std::iter::empty()) == Dot::Ok);
+        view.geometry.display_only = true;
+        assert!(view_dot(&view, None, sheet.annotations_of(view.id)) == Dot::None);
     }
 }

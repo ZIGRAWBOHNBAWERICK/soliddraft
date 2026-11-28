@@ -124,7 +124,8 @@ fn moving_a_sheet_scale_view_rescales_geometry_annotations_and_descendants() {
             .unwrap();
         let after = d.clone();
         let view = d.view(front).unwrap();
-        let proposal = measure::propose(view, &[measure::Pick { view: front, curve, end: None }], &[]).unwrap();
+        let proposal =
+            measure::propose(view, &[measure::Pick { view: front, curve, end: None, at: None }], &[]).unwrap();
         let value = measure::linear_value(
             LinearOrientation::Horizontal,
             proposal.points[0],
@@ -221,7 +222,7 @@ fn sheet_scale_changes_follow_parent_scale_views_across_sheets() {
         stack.run(&mut d, &Command::SetSheetScale { sheet, scale }, None).unwrap();
         let after = d.clone();
         let view = d.view(top).unwrap();
-        let proposal = measure::propose(view, &[measure::Pick { view: top, curve, end: None }], &[]).unwrap();
+        let proposal = measure::propose(view, &[measure::Pick { view: top, curve, end: None, at: None }], &[]).unwrap();
         let value = measure::linear_value(
             LinearOrientation::Horizontal,
             proposal.points[0],

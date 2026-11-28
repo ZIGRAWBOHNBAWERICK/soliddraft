@@ -108,6 +108,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         projections: Vec::new(),
     };
     let mut contexts = Contexts::new();
+    let previous = saved_broken_transforms(drawing);
     let mut ids: Vec<ViewId> = drawing.sheets.iter().flat_map(|s| &s.views).map(|v| v.id).collect();
     ids.sort_by_key(|&id| {
         std::iter::successors(drawing.view(id), |view| view.geometry_parent().and_then(|parent| drawing.view(parent)))
@@ -123,8 +124,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
             .geometry_parent()
             .and_then(|parent| report.dangling_views.iter().find(|failure| failure.view == parent))
             .map(|failure| failure.cause.clone());
-        let failure = failure
-            .or_else(|| project::compute_in(drawing, part, &index, id, &mut contexts).err().map(|e| view_cause(&e)));
+        let failure = failure.or_else(|| {
+            project::compute_with_previous(drawing, part, &index, id, &mut contexts, Some(&previous))
+                .err()
+                .map(|e| view_cause(&e))
+        });
         if let Some(cause) = failure {
             let sheet = drawing.sheet_of(id).expect("listed");
             report.dangling_views.push(DanglingView {
@@ -145,12 +149,16 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
                 && view.geometry.coarse == ctx.projected.geometry.coarse
                 && view.geometry != ctx.projected.geometry)
         {
+            if let Some(before) = previous.get(&id) {
+                project::remap_view_boundaries(view, before, &ctx.xf);
+            }
             view.geometry = ctx.projected.geometry.clone();
             report.views_updated += usize::from(view.is_printed());
         }
         report.projections.push((id, ctx.projected.clone()));
     }
     for id in ids {
+        remap_parent(drawing, id, &previous, &contexts);
         follow_parent(drawing, id, &contexts);
     }
     let made_from_part = drawing.sheets.iter().position(|sheet| sheet.annotations.iter().any(|a| a.source.is_some()));
@@ -175,9 +183,11 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         crate::pmi_items::refresh(
             drawing,
             part,
+            &index,
             |id| id == crate::SHEET || report.projections.iter().any(|(view, _)| *view == id),
             true,
         );
+        report.changed.retain(|change| drawing.annotation(change.annotation).is_some());
         let views: Vec<ViewContext> = drawing.sheets[sheet]
             .views
             .iter()
@@ -253,6 +263,26 @@ pub(crate) fn edit_breaks(
     regenerate(drawing, part, id, Some(breaks))
 }
 
+fn saved_broken_transforms(drawing: &Drawing) -> project::Transforms {
+    drawing
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.views)
+        .filter(|view| !view.geometry.breaks.is_empty())
+        .filter_map(|view| Some((view.id, view.geometry.transform?)))
+        .collect()
+}
+
+fn remap_parent(drawing: &mut Drawing, id: ViewId, previous: &project::Transforms, contexts: &Contexts) {
+    if let Some(parent) = drawing.view(id).and_then(crate::View::geometry_parent)
+        && let (Some(before), Some(after)) = (previous.get(&parent), contexts.get(&parent))
+        && drawing.view(parent).is_some_and(|view| view.geometry == after.projected.geometry)
+    {
+        let view = drawing.view_mut(id).expect("listed view");
+        project::remap_parent_boundary(&mut view.kind, before, &after.xf);
+    }
+}
+
 fn regenerate(
     drawing: &mut Drawing,
     part: &Part,
@@ -266,8 +296,9 @@ fn regenerate(
         .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
         .collect();
     let index = PartIndex::build(part)?;
-    let mut previous = project::Transforms::new();
-    let mut staged = None;
+    let mut previous = saved_broken_transforms(drawing);
+    let mut staged = drawing.clone();
+    let break_edit = breaks.is_some();
     if let Some(breaks) = breaks {
         // Where the views were drawn, so crops and callouts stay on the same material.
         previous.extend(descendants.iter().filter_map(|&id| Some((id, drawing.view(id)?.geometry.transform?))));
@@ -288,23 +319,20 @@ fn regenerate(
             .map(|(view, ctx)| (view, ctx.xf))
             .collect();
         previous.extend(estimated);
-        let mut next = drawing.clone();
-        next.view_mut(id).expect("existing view").breaks = breaks;
-        staged = Some(next);
+        staged.view_mut(id).expect("existing view").breaks = breaks;
     }
-    let source = staged.as_ref().unwrap_or(drawing);
     let outgrown: Vec<ViewId> = ids
         .iter()
         .copied()
         .filter(|view| {
-            staged.is_some()
+            break_edit
                 && !previous.contains_key(view)
                 && drawing.view(*view).is_some_and(|v| !v.geometry.breaks.is_empty())
         })
         .collect();
     if !outgrown.is_empty() {
         // The plain view gives the frame, scale and centre the saved gap is drawn with.
-        let mut plain = source.clone();
+        let mut plain = staged.clone();
         for &view in &outgrown {
             let v = plain.view_mut(view).expect("listed view");
             project::clear_clipping(v);
@@ -321,7 +349,7 @@ fn regenerate(
     let mut contexts = Contexts::new();
     for &id in &ids {
         project::compute_with_previous(
-            source,
+            &staged,
             part,
             &index,
             id,
@@ -329,29 +357,19 @@ fn regenerate(
             (!previous.is_empty()).then_some(&previous),
         )?;
     }
-    if let Some(next) = staged {
-        *drawing = next;
-    }
     for &id in &ids {
         let ctx = &contexts[&id];
-        let view = drawing.view_mut(id).expect("computed view");
+        let view = staged.view_mut(id).expect("computed view");
         if let Some(before) = previous.get(&id) {
             project::remap_view_boundaries(view, before, &ctx.xf);
         }
         view.geometry = ctx.projected.geometry.clone();
     }
-    for &child in &descendants {
-        let view = drawing.view_mut(child).expect("dependent view");
-        if let Some(parent) = view.geometry_parent()
-            && let (Some(before), Some(after)) = (previous.get(&parent), contexts.get(&parent))
-        {
-            project::remap_parent_boundary(&mut view.kind, before, &after.xf);
-        }
-    }
     for child in descendants {
-        follow_parent(drawing, child, &contexts);
+        remap_parent(&mut staged, child, &previous, &contexts);
+        follow_parent(&mut staged, child, &contexts);
     }
-    for sheet in &mut drawing.sheets {
+    for sheet in &mut staged.sheets {
         refresh_hole_tables(sheet, &index, &contexts, |view| ids.contains(&view));
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
         for a in sheet.annotations.iter_mut().filter(|a| ids.contains(&a.view)) {
@@ -359,8 +377,22 @@ fn regenerate(
             re_resolve(a, &index, context, symbols, part);
         }
     }
-    crate::pmi_items::refresh(drawing, part, |view| ids.contains(&view), false);
-    drawing.refused_views.retain(|refusal| !ids.contains(&refusal.view));
+    let retargeted = crate::pmi_items::refresh(&mut staged, part, &index, |view| ids.contains(&view), false);
+    if !retargeted.is_empty() {
+        for sheet in 0..staged.sheets.len() {
+            let views: Vec<_> = staged.sheets[sheet]
+                .views
+                .iter()
+                .filter(|view| ids.contains(&view.id))
+                .map(|view| contexts[&view.id].clone())
+                .collect();
+            if !views.is_empty() {
+                crate::pmi_items::import_matching(&mut staged, sheet, part, &index, &views, Some(&retargeted))?;
+            }
+        }
+    }
+    staged.refused_views.retain(|refusal| !ids.contains(&refusal.view));
+    *drawing = staged;
     Ok(())
 }
 
@@ -419,10 +451,6 @@ pub(crate) fn re_resolve(
             Resolution::Lost(why) => Err(why),
         })
         .collect();
-    let resolved: Vec<Option<Entity>> = found.iter().map(|entity| entity.as_ref().ok().copied()).collect();
-    if !crate::pmi_items::anchors_on_item(a, &resolved, part, index) {
-        a.source = None;
-    }
     let lost: Vec<usize> = found.iter().enumerate().filter(|(_, r)| r.is_err()).map(|(i, _)| i).collect();
     if !lost.is_empty() {
         let refs: Vec<&EntityRef> = lost.iter().map(|i| &a.anchors[*i].entity).collect();

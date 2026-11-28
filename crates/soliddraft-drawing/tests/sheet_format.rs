@@ -213,7 +213,7 @@ fn the_projection_symbol_stays_inside_its_cell_below_the_caption() {
     let block = soliddraft_drawing::library::template("ansi-e");
     let o = block.title_block_origin();
     let field = block.title_block.fields.iter().find(|f| f.key == "projection").expect("a projection cell");
-    for layout in [None, Some(TitleCell { cell: [0.0, 0.0, 20.6, 8.5] })] {
+    for layout in [None, Some(TitleCell { cell: [0.0, 0.0, 20.6, 8.5] }), Some(TitleCell { cell: field.cell })] {
         let command = Command::SetTitleLayout { sheet: 0, key: "projection".into(), layout };
         stack.run(&mut drawing, &command, None).unwrap();
         let [x, y, w, h] = layout.map_or(field.cell, |c| c.cell);
@@ -260,6 +260,32 @@ fn the_projection_symbol_stays_inside_its_cell_below_the_caption() {
             }
         }
     }
+}
+
+#[test]
+fn a_smaller_format_keeps_the_revision_table_on_the_page() {
+    use soliddraft_drawing::{RevisionRow, apply};
+    use soliddraft_kernel_api::Point2;
+    let mut drawing = fixture::bracket_a3();
+    let sheet = &mut drawing.sheets[0];
+    sheet.views.clear();
+    sheet.annotations.clear();
+    sheet.tables.clear();
+    let format = |id: &str| Command::SetSheetFormat { sheet: 0, template: id.into() };
+    apply(&mut drawing, &format("ansi-e")).unwrap();
+    apply(
+        &mut drawing,
+        &Command::AddRevision { sheet: 0, row: RevisionRow { revision: "B".into(), ..Default::default() } },
+    )
+    .unwrap();
+    let before = drawing.clone();
+    let error = apply(&mut drawing, &format("iso-a3")).unwrap_err().to_string();
+    assert!(error.contains("revision table"), "{error}");
+    assert_eq!(drawing, before);
+    apply(&mut drawing, &Command::MoveTable { sheet: 0, table: 0, to: Point2::new(200.0, 250.0) }).unwrap();
+    apply(&mut drawing, &format("iso-a3")).unwrap();
+    let list = display::layout_sheet(&drawing, 0);
+    assert!(list.printable().any(|item| matches!(item, Item::Text(t) if t.text == "REVISIONS" && t.pos.v > 200.0)));
 }
 
 #[test]

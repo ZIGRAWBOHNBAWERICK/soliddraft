@@ -538,6 +538,9 @@ pub struct ViewGeometry {
     /// A half section's symmetry line across the view, in view millimetres.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub symmetry_segments: Vec<[Point2; 2]>,
+    /// Unclipped projected model bounds of a half section, in model millimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry_bounds: Option<[f64; 4]>,
 }
 
 /// A closed-up break as drawn: two break lines `gap` apart across the view.

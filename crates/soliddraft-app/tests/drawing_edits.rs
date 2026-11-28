@@ -125,7 +125,7 @@ fn circle_picks_follow_sheet_view_and_inherited_scales_through_history() {
                 .iter()
                 .position(|c| c.source.kernel_hint == circles[0].entity.kernel_hint)
                 .unwrap();
-            let pick = Pick { view: top, curve, end: None };
+            let pick = Pick { view: top, curve, end: None, at: None };
             let proposal = propose(view, &[pick], circles).unwrap();
             assert_eq!(proposal.kind, DimensionKind::Diameter);
             assert!(
@@ -170,7 +170,7 @@ fn same_scale_model_update_restores_picking_metadata_with_drawing_history() {
     let after = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
     let diameter = |d: &DrawingDoc| {
         let view = d.drawing.view(top).unwrap();
-        let pick = Pick { view: top, curve, end: None };
+        let pick = Pick { view: top, curve, end: None, at: None };
         let proposal = propose(view, &[pick], &d.circles[&top]).unwrap();
         assert_eq!(proposal.kind, DimensionKind::Diameter, "circle picking lost its exact metadata");
         proposal.radius * 2.0 / project::view_scale(&d.drawing, top).unwrap()
@@ -209,7 +209,7 @@ fn transferring_a_sheet_scale_circle_keeps_geometry_picking_and_history_together
         for circle in &d.circles[&top] {
             let curve =
                 view.geometry.curves.iter().position(|c| c.source.kernel_hint == circle.entity.kernel_hint).unwrap();
-            let proposal = propose(view, &[Pick { view: top, curve, end: None }], &d.circles[&top]).unwrap();
+            let proposal = propose(view, &[Pick { view: top, curve, end: None, at: None }], &d.circles[&top]).unwrap();
             assert_eq!(proposal.kind, DimensionKind::Diameter);
             assert!((proposal.radius * 2.0 / scale - 10.0).abs() < 1e-6);
             assert_eq!(circle.centre, d.transforms[&top].point(circle.model_centre));

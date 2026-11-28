@@ -202,10 +202,10 @@ pub(crate) fn plane_edge(
     axis: Vec3,
     tol: f64,
     leg: u8,
-    on_feature: impl Fn(EdgeId) -> bool,
+    on_feature: impl Fn(&[soliddraft_kernel_api::FaceId]) -> bool,
 ) -> Option<(EdgeId, bool)> {
     let mut best: Option<((bool, f64, f64), EdgeId)> = None;
-    for (id, curve) in index.edges().filter(|(id, _)| on_feature(*id)) {
+    for (id, curve, _) in index.edges_with_faces().filter(|(_, _, faces)| on_feature(faces)) {
         let samples = curve.sample(0.0);
         if !samples.iter().all(|q| (*q - p).dot(axis).abs() <= tol.max(1e-7)) {
             continue;

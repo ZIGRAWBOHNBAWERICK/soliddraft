@@ -1467,10 +1467,11 @@ fn show_markup(s: &mut DrawingSession) {
     let Some(place) = s.review.as_ref().and_then(|r| r.place()).copied() else { return };
     if place.sheet < s.doc.drawing.sheets.len() && place.sheet != s.sheet {
         s.sheet = place.sheet;
-        s.needs_fit = true;
         s.note_edit = None;
         s.sheet_rename = None;
     }
+    s.camera.centre = place.at;
+    s.needs_fit = false;
     s.selection = Some(DrawingSel::Review);
 }
 

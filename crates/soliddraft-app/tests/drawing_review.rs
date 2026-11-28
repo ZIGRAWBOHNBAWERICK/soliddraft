@@ -157,6 +157,22 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     let template = soliddraft_drawing::library::template(saved_drawing.drawing().sheets[0].template.as_str());
     let text = soliddraft_drawing::measure::display_text(dimension, &template.style_file().symbols);
     assert!(text.contains("8 H8"), "{text}");
+    let note = saved_drawing
+        .drawing()
+        .sheets
+        .iter()
+        .flat_map(|sheet| &sheet.annotations)
+        .find(|a| a.source.as_ref().and_then(PmiSource::item) == Some("Bore note"))
+        .expect("the saved drawing shows the bore note");
+    assert!(matches!(&note.body, AnnotationKind::Note { text, .. } if text == "Hone to size after boring"));
+    let [anchor] = note.anchors.as_slice() else { panic!("one face note leader") };
+    let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else { panic!("a model edge") };
+    let note_edge = saved_part.resolve_edge(reference, body).unwrap();
+    assert!(face.edges.contains(&note_edge), "the note leader must point to the through-bore wall");
+    assert!(saved_drawing.drawing().sheets.iter().flat_map(|sheet| &sheet.annotations).all(|a| {
+        a.source.as_ref().and_then(PmiSource::item) != Some("Boss note")
+            && !matches!(&a.body, AnnotationKind::Note { text, .. } if text == "Deburr the boss rim")
+    }));
 
     // Compare: each change shows its value before and after in the review panel.
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
@@ -220,6 +236,12 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     app.get_by_label("On drawing sheet 1");
     let place = *session(&app).review.as_ref().unwrap().place().expect("the comment is on the drawing");
     assert_eq!((place.sheet, place.annotation), (0, bore));
+    app.state_mut().state.drawing.session.as_mut().unwrap().camera.centre =
+        soliddraft_kernel_api::Point2::new(-1000.0, -1000.0);
+    app.get_by_label("Show on the sheet").click();
+    app.run_steps(2);
+    let drawing_session = session(&app);
+    assert!(drawing_session.canvas_rect.contains(drawing_session.screen_of(place.at)));
     app.get_by_label("Comment").focus();
     app.run_steps(2);
     app.get_by_label("Comment").type_text("Check the bore fit on the drawing.");
@@ -262,16 +284,29 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     drawing(&mut app, DrawingAction::CloseDrawing);
     drawing(&mut app, DrawingAction::OpenFile(drawing_path.clone()));
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
+    app.state_mut().state.drawing.session.as_mut().unwrap().camera.centre =
+        soliddraft_kernel_api::Point2::new(-1000.0, -1000.0);
     drawing(&mut app, DrawingAction::OpenMarkup(Some(markup_path.clone())));
     let review = session(&app).review.as_ref().expect("the drawing is under review");
     assert_eq!(review.draft().map(|d| d.text.as_str()), Some("Check the bore fit on the drawing."));
     assert_eq!(review.place().map(|p| (p.sheet, p.annotation)), Some((0, bore)));
     assert_eq!(session(&app).sheet, 0);
     assert_eq!(session(&app).selection, Some(DrawingSel::Review));
+    let reopened_place = review.place().unwrap();
+    assert!(session(&app).canvas_rect.contains(session(&app).screen_of(reopened_place.at)));
     app.get_by_label("Attached to: Bore diameter");
     app.get_by_label("On drawing sheet 1");
     review_value(&app, "Baseline", "Ø8 H7");
     review_value(&app, "Candidate", "Ø8 H8");
+    for (row, was, now) in [
+        ("Changed · Bore note", "Hone after boring", "Hone to size after boring"),
+        ("Removed · Boss note", "Deburr the boss rim", "Item not present"),
+    ] {
+        app.get_by_label(row).click();
+        app.run_steps(2);
+        review_value(&app, "Baseline", was);
+        review_value(&app, "Candidate", now);
+    }
 
     // Reattached to the boss rim, the bore annotation no longer shows the bore diameter,
     // so a comment on that item does not go on it.

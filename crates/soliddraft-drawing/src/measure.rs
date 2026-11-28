@@ -87,10 +87,27 @@ fn resolve_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &Anchor) ->
 }
 
 /// Refines a curve pick to its model point and maps it back to the drawing.
-pub fn place_model_pick(index: &PartIndex, xf: &ViewTransform, anchor: &mut Anchor) -> bool {
+pub fn place_model_pick(
+    index: &PartIndex,
+    xf: &ViewTransform,
+    anchor: &mut Anchor,
+    drawn: &crate::Curve2,
+    at: Option<Point2>,
+) -> bool {
+    if anchor.attach == Attach::Mid && !xf.breaks.is_empty() {
+        let Some(at) = interior_model_pick(index, xf, drawn, at.unwrap_or(anchor.cached)) else { return false };
+        anchor.attach = Attach::Point { at };
+    }
     let Some(at) = resolve_model_pick(index, xf, anchor) else { return false };
     anchor.cached = xf.point(at);
     true
+}
+
+fn interior_model_pick(index: &PartIndex, xf: &ViewTransform, drawn: &crate::Curve2, at: Point2) -> Option<Vec3> {
+    let Resolution::Found(Entity::Edge(edge)) = index.resolve(&drawn.source) else { return None };
+    let curve = index.edge_curve(edge)?;
+    let xf = xf.in_leg(drawn.source.section_leg);
+    crate::project::point_on_drawn_edge(&xf, curve, at, drawn.path.segments())
 }
 
 /// The direction extension lines of a dimension run in, in the view: across the
@@ -436,6 +453,8 @@ pub struct Pick {
     pub curve: usize,
     /// `Some` when the click landed on an end of the curve: which one.
     pub end: Option<Attach>,
+    /// Click position in view millimetres.
+    pub at: Option<Point2>,
 }
 
 /// What Smart dimension proposes from its picks, before placement decides the
@@ -514,9 +533,17 @@ pub fn propose_model(view: &View, picks: &[Pick], index: &PartIndex, xf: &ViewTr
         let ends = [curve.start(), curve.end()].map(|p| flat.precise_point(p));
         Some((c, shape, Some(ends)))
     })?;
-    let model: Vec<_> = proposal.anchors.iter().map(|a| resolve_model_pick(index, xf, a)).collect::<Option<_>>()?;
-    for (anchor, p) in proposal.anchors.iter_mut().zip(&model) {
-        anchor.cached = xf.point(*p);
+    let mut model = Vec::with_capacity(proposal.anchors.len());
+    for (i, anchor) in proposal.anchors.iter_mut().enumerate() {
+        if anchor.attach == Attach::Mid && !xf.breaks.is_empty() {
+            let pick = picks.get(i)?;
+            let drawn = view.geometry.curves.get(pick.curve)?;
+            let at = pick.at.unwrap_or_else(|| shape_of(&drawn.path).mid());
+            anchor.attach = Attach::Point { at: interior_model_pick(index, xf, drawn, at)? };
+        }
+        let point = resolve_model_pick(index, xf, anchor)?;
+        anchor.cached = xf.point(point);
+        model.push(point);
     }
     if !proposal.points.is_empty() {
         proposal.model_points = Some(model.iter().map(|p| flat.precise_point(*p)).collect());

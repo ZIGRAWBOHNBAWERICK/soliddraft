@@ -1123,6 +1123,9 @@ fn exporting_omits_a_display_section_annotations_and_its_marks_on_another_sheet(
     apply(&mut drawing, &Command::AddAnnotation { annotation: symbol }).unwrap();
     let child = layout_sheet(&drawing, 1);
     assert!(
+        child.items.iter().any(|i| matches!(i, Item::Text(t) if t.text == zone && matches!(t.owner, Owner::Table(_))))
+    );
+    assert!(
         child.printable().all(|i| !matches!(i, Item::Text(t) if t.text == zone && matches!(t.owner, Owner::Table(_))))
     );
     assert!(child.printable().any(|i| matches!(i, Item::Text(t) if t.text == "Display section")));
@@ -1243,7 +1246,8 @@ fn aligned_section_dimensions_keep_the_second_leg_on_rebuild() {
         })
         .expect("the second leg unfolds a 100 mm model edge along the sheet's X");
     let proposal =
-        propose(&section, &[Pick { view: section.id, curve: edge, end: None }], &ctx.projected.circles).unwrap();
+        propose(&section, &[Pick { view: section.id, curve: edge, end: None, at: None }], &ctx.projected.circles)
+            .unwrap();
     assert_eq!(proposal.anchors.iter().map(|a| a.attach).collect::<Vec<_>>(), [Attach::Start, Attach::End]);
     let source = &section.geometry.curves[edge].source;
     let Resolution::Found(Entity::Edge(model_edge)) = index.resolve(source) else { panic!("model edge") };
@@ -1575,7 +1579,31 @@ fn dimension_proposals_and_commands_use_the_unbroken_model_edge() {
             c.visible && c.source.kind == EntityKind::Edge && c.ends.is_some_and(|[x, y]| (x.u - y.u).abs() > 85.0)
         })
         .unwrap();
-    let picks = [Pick { view: FRONT, curve: edge, end: None }];
+    let picks = [Pick { view: FRONT, curve: edge, end: None, at: None }];
+    let drawn = &view.geometry.curves[edge];
+    let retained = [Vec3::new(20.0, 0.0, 50.0), Vec3::new(100.0, 0.0, 50.0)].map(|station| {
+        let at = context.xf.point(station);
+        let mut anchor = soliddraft_drawing::Anchor {
+            entity: drawn.source.clone(),
+            attach: soliddraft_drawing::Attach::Mid,
+            cached: at,
+        };
+        assert!(soliddraft_drawing::measure::place_model_pick(&index, &context.xf, &mut anchor, drawn, Some(at)));
+        anchor
+    });
+    for (anchor, station) in retained.iter().zip([20.0, 100.0]) {
+        let soliddraft_drawing::Attach::Point { at } = anchor.attach else { panic!("a retained model point") };
+        assert!((at.x - station).abs() < 1e-6, "{at:?}");
+    }
+    assert!(
+        (context.xf.unproject(retained[1].cached).x - context.xf.unproject(retained[0].cached).x - 80.0).abs() < 1e-6
+    );
+    let station = retained[0].cached;
+    let endpoint = Pick { view: FRONT, curve: edge, end: Some(soliddraft_drawing::Attach::End), at: None };
+    let two_picks = [endpoint, Pick { view: FRONT, curve: edge, end: None, at: Some(station) }];
+    let two_points = propose_model(view, &two_picks, &index, &context.xf).unwrap();
+    assert_eq!(two_points.anchors[1].cached, station);
+    assert_eq!(two_points.anchors[1], retained[0]);
     let proposal = propose_model(view, &picks, &index, &context.xf).unwrap();
     let distance = proposal.distance(LinearOrientation::Horizontal, 1.0);
     assert!((distance - 120.0).abs() < 1e-6);
@@ -1979,6 +2007,23 @@ fn editing_a_break_keeps_a_crop_and_a_broken_out_section_on_the_same_material() 
         let min = xs.iter().copied().fold(f64::INFINITY, f64::min);
         let max = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         assert!((min - 30.0).abs() < 1e-3 && (max - 120.0).abs() < 1e-3, "{interval:?}: {min}..{max}");
+        if interval.is_some() {
+            let grown = box_part(&kernel, "block", Vec3::new(140.0, 50.0, 70.0));
+            let mut rebuilt = drawing_roundtrip(&drawing);
+            update_from_model(&mut rebuilt, &grown).unwrap();
+            let view = rebuilt.view(FRONT).unwrap();
+            let xf = view.geometry.transform.unwrap();
+            let crop = view.crop.as_ref().unwrap().bounds();
+            let [a, b] = [Point2::new(crop[0], crop[1]), Point2::new(crop[2], crop[3])].map(|p| xf.unproject(p));
+            assert!((a.x - 30.0).abs() < 1e-3 && (b.x - 125.0).abs() < 1e-3, "{interval:?}: {a:?} {b:?}");
+            assert!((a.z + 10.0).abs() < 1e-3 && (b.z - 60.0).abs() < 1e-3, "{interval:?}: {a:?} {b:?}");
+            let Boundary::Circle { center, radius } = view.broken_out[0].boundary else {
+                panic!("the rebuilt window remains a circle")
+            };
+            assert!((xf.unproject(center).x - 100.0).abs() < 1e-3);
+            assert!((xf.unproject(center).z - 25.0).abs() < 1e-3);
+            assert_eq!(radius, 5.0);
+        }
     }
 }
 
@@ -2042,6 +2087,17 @@ fn a_cropped_half_section_draws_its_symmetry_line_only_inside_the_crop() {
         assert!(max <= right + 1e-3, "broken {broken}: {max} past {right}");
         let v = p(0.0, 60.0).v;
         assert!(segments.iter().flatten().all(|q| (q.v - v).abs() < 1e-3));
+        let mut reopened = drawing_roundtrip(&drawing);
+        apply(
+            &mut reopened,
+            &Command::SetViewScale { view: FRONT, scale: soliddraft_drawing::ViewScale::Custom { factor: 2.0 } },
+        )
+        .unwrap();
+        let view = reopened.view(FRONT).unwrap();
+        let xf = view.geometry.transform.unwrap();
+        let end = view.geometry.symmetry_segments.iter().flatten().map(|p| p.u).fold(f64::NEG_INFINITY, f64::max);
+        let material_end = xf.point(Vec3::new(120.0, 0.0, 60.0)).u;
+        assert!((end - material_end - 3.0).abs() < 1e-3, "{broken}: end at {end}, material at {material_end}");
     }
 }
 
@@ -2389,7 +2445,7 @@ fn a_hatch_only_detail_must_keep_its_break_shorter_than_the_omission() {
 }
 
 #[test]
-fn rebuilding_a_same_id_requirement_drops_the_link_from_the_old_face() {
+fn rebuilding_a_same_id_requirement_replaces_the_old_finish() {
     use soliddraft_drawing::{Entity, PmiSource, Resolution, review};
     let kernel = BoxKernel::new();
     let original = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
@@ -2422,20 +2478,33 @@ fn rebuilding_a_same_id_requirement_drops_the_link_from_the_old_face() {
     let topology = changed.geometry.topology().unwrap();
     let top = topology.faces.iter().find(|f| f.centroid.z == 50.0).unwrap();
     changed.requirements.rows.push(finish_row(name, "Ra 0.8", top.id));
-    update_from_model(&mut drawing, &changed).unwrap();
-    let drawing = drawing_roundtrip(&drawing);
-    assert!(drawing.annotation(old).unwrap().source.is_none());
-    assert!(
-        matches!(&drawing.annotation(old).unwrap().body, AnnotationKind::SurfaceFinish { text, .. } if text == "Ra 1.6")
-    );
-    let replacement = drawing.annotation(review::place_of_item(&drawing, name).unwrap().annotation).unwrap();
-    assert_ne!(replacement.id, old);
     let index = PartIndex::build(&changed).unwrap();
-    let Resolution::Found(Entity::Edge(edge)) = index.resolve(&replacement.anchors[0].entity) else {
-        panic!("top edge")
-    };
-    assert!(top.edges.contains(&edge));
-    assert!(matches!(&replacement.body, AnnotationKind::SurfaceFinish { text, .. } if text == "Ra 0.8"));
+    let mut local = drawing.clone();
+    soliddraft_drawing::regenerate_view(&mut local, &changed, FRONT).unwrap();
+    assert_eq!(local.model.pinned, drawing.model.pinned);
+    update_from_model(&mut drawing, &changed).unwrap();
+    assert!(review::place_of_item(&drawing, name).is_some());
+    for drawing in [local, drawing] {
+        let drawing = drawing_roundtrip(&drawing);
+        let sheet = &drawing.sheets[0];
+        assert!(
+            sheet
+                .annotations
+                .iter()
+                .all(|a| !matches!(&a.body, AnnotationKind::SurfaceFinish { text, .. } if text == "Ra 1.6")),
+            "the obsolete finish {old} may not print"
+        );
+        let replacement = sheet
+            .annotations
+            .iter()
+            .find(|a| a.source.as_ref().and_then(PmiSource::item) == Some(name))
+            .expect("the named finish is drawn on its new face");
+        let Resolution::Found(Entity::Edge(edge)) = index.resolve(&replacement.anchors[0].entity) else {
+            panic!("top edge")
+        };
+        assert!(top.edges.contains(&edge), "{edge:?}");
+        assert!(matches!(&replacement.body, AnnotationKind::SurfaceFinish { text, .. } if text == "Ra 0.8"));
+    }
 }
 
 fn finish_row(name: &str, value: &str, face: soliddraft_kernel_api::FaceId) -> soliddraft_model::pmi::PmiRow {

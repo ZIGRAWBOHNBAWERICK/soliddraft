@@ -586,7 +586,7 @@ pub(super) fn parent_marks(drawing: &Drawing, sheet_index: usize, ctx: &Context<
                 _ => {}
             }
             if parent.geometry.display_only && first != items.len() {
-                list.display_only_relationships.push(first..items.len());
+                list.display_only_items.push(first..items.len());
             }
         }
     }

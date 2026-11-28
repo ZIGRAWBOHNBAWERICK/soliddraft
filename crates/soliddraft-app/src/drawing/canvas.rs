@@ -505,7 +505,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
         DrawingTool::Note => {
             if clicked && let Some(p) = pointer {
-                note_tool(s, hit, p, &mut push);
+                note_tool(s, doc, hit, p, &mut push);
             }
         }
         DrawingTool::HoleCallout | DrawingTool::CentreMark => {
@@ -552,7 +552,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         | DrawingTool::SurfaceFinish
         | DrawingTool::RevisionSymbol
         | DrawingTool::Weld => {
-            tools::symbol_tool(s, &sheet2, &lctx, hit, pointer, clicked, &mut push);
+            tools::symbol_tool(s, doc, &sheet2, &lctx, hit, pointer, clicked, &mut push);
         }
     }
 
@@ -1201,8 +1201,8 @@ fn smart_dimension_tool(
                 s.say("Both picks must be in the same view");
                 return;
             }
-            let pick = Pick { view, curve: index, end };
-            if s.picks.contains(&pick) {
+            let pick = Pick { view, curve: index, end, at: Some(to_view(s, view, p)) };
+            if s.picks.iter().any(|p| p.curve == index && p.end == end) {
                 return;
             }
             let current = tools::cache_picking(s, doc, view);
@@ -1290,9 +1290,30 @@ fn build_dimension(s: &DrawingSession, prop: &resolve::Proposal, placement_sheet
     }
 }
 
-fn note_tool(s: &mut DrawingSession, hit: Option<Hit>, p: Point2, push: &mut impl FnMut(DrawingAction)) {
+fn note_tool(
+    s: &mut DrawingSession,
+    doc: &crate::document::Document,
+    hit: Option<Hit>,
+    p: Point2,
+    push: &mut impl FnMut(DrawingAction),
+) {
     let id = s.doc.next_annotation_id();
     let (view, anchors, placement, leader) = match hit {
+        Some(hit @ Hit { owner: Owner::Curve(view, ..), .. })
+            if s.sheet().view(view).is_some_and(|v| !v.geometry.breaks.is_empty()) =>
+        {
+            let Some((view, anchor)) = tools::anchor_from_hit(s, doc, hit, p) else {
+                s.say("Pick edges with measurable model geometry");
+                return;
+            };
+            let at = anchor.cached;
+            (
+                view,
+                vec![anchor],
+                Point2::new(at.u + 14.0, at.v + 10.0),
+                vec![Point2::new(at.u + 10.0, at.v + 10.0 - 1.75)],
+            )
+        }
         Some(Hit { owner: Owner::Curve(view, index), .. }) => {
             let v = s.sheet().view(view).cloned();
             match v.and_then(|v| v.geometry.curves.get(index).cloned().map(|c| (v, c))) {

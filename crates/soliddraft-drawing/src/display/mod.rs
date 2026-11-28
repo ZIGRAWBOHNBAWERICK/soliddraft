@@ -150,6 +150,13 @@ pub enum Item {
 }
 
 impl Item {
+    pub(crate) fn bounds(&self) -> kurbo::Rect {
+        match self {
+            Self::Path(path) => path.path.bounding_box(),
+            Self::Text(text) => text.bounds(0.0),
+        }
+    }
+
     /// What the item belongs to.
     pub fn owner(&self) -> Owner {
         match self {
@@ -164,6 +171,26 @@ impl Item {
             Item::Path(p) => p.role,
             Item::Text(t) => t.role,
         }
+    }
+}
+
+impl TextItem {
+    pub(crate) fn bounds(&self, padding: f64) -> kurbo::Rect {
+        let width = text_width(&self.text, self.height);
+        let left = match self.halign {
+            Align::Left => 0.0,
+            Align::Centre => -width / 2.0,
+            Align::Right => -width,
+        };
+        let bottom = match self.valign {
+            VAlign::Bottom => 0.0,
+            VAlign::Centre => -self.height / 2.0,
+            VAlign::Top => -self.height,
+        };
+        let rect = kurbo::Rect::new(left, bottom, left + width, bottom + self.height).inflate(padding, padding);
+        let transform =
+            kurbo::Affine::translate((self.pos.u, self.pos.v)) * kurbo::Affine::rotate(self.angle.to_radians());
+        transform.transform_rect_bbox(rect)
     }
 }
 
@@ -187,7 +214,8 @@ pub struct DisplayList {
     display_only_views: Vec<ViewId>,
     display_only_annotations: Vec<AnnotationId>,
     display_only_tables: Vec<usize>,
-    display_only_relationships: Vec<std::ops::Range<usize>>,
+    display_only_items: Vec<std::ops::Range<usize>>,
+    print_only_items: Vec<Item>,
 }
 
 /// One dimension as its definition points, in sheet millimetres.
@@ -271,12 +299,16 @@ impl DisplayList {
     /// The items that belong on paper: everything but the interface's own marks (the
     /// changed-value highlight and the out-of-date hatch).
     pub fn printable(&self) -> impl Iterator<Item = &Item> {
-        self.items.iter().enumerate().filter_map(|(index, item)| {
-            (Self::on_sheet(item)
-                && self.prints_owner(item.owner())
-                && !self.display_only_relationships.iter().any(|range| range.contains(&index)))
-            .then_some(item)
-        })
+        self.items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                (Self::on_sheet(item)
+                    && self.prints_owner(item.owner())
+                    && !self.display_only_items.iter().any(|range| range.contains(&index)))
+                .then_some(item)
+            })
+            .chain(&self.print_only_items)
     }
 
     pub(crate) fn sheet_items(&self) -> impl Iterator<Item = &Item> {
@@ -521,7 +553,8 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         display_only_views: Vec::new(),
         display_only_annotations: Vec::new(),
         display_only_tables: Vec::new(),
-        display_only_relationships: Vec::new(),
+        display_only_items: Vec::new(),
+        print_only_items: Vec::new(),
     };
     let Some(sheet) = drawing.sheets.get(sheet_index) else {
         return list;
@@ -539,7 +572,7 @@ pub fn layout(drawing: &Drawing, sheet_index: usize, ctx: &Context<'_>) -> Displ
         .filter_map(|(i, table)| table.hole_view.filter(|v| list.display_only_views.contains(v)).map(|_| i))
         .collect();
     format_items(drawing, sheet, ctx, &mut list.items);
-    tables::table_items(drawing, sheet, ctx, &mut list.items);
+    tables::table_items(drawing, sheet, ctx, &mut list);
     for view in &sheet.views {
         view_items(drawing, sheet, view, ctx, &mut list);
     }
@@ -691,7 +724,11 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
             owner: Owner::Sheet,
         }));
         if field.symbol.as_deref() == Some("projection") {
-            let (centre, scale) = projection_symbol_fit([cell.0, cell.1, cell.2, cell.3], field.cell);
+            let (centre, scale) = if placed.is_some() {
+                projection_symbol_fit([cell.0, cell.1, cell.2, cell.3])
+            } else {
+                (Point2::new(cell.0 + w / 2.0, cell.1 + TEMPLATE_SYMBOL_RISE), 1.0)
+            };
             projection_symbol(sheet.projection, centre, scale, lines.thin, items);
             continue;
         }
@@ -733,14 +770,9 @@ const SYMBOL_MARGIN: f64 = 0.3;
 pub(crate) const MIN_SYMBOL_SCALE: f64 = 0.65;
 
 /// Where the projection symbol sits in a title cell `[x, y, width, height]` and its
-/// size as a fraction of full size. A cell as large as the template's cell `template`
-/// keeps the full-size symbol where the template lays it out. A smaller cell gets the
-/// symbol centred below the caption, never larger than full size, and inside the cell.
-pub(crate) fn projection_symbol_fit(cell: [f64; 4], template: [f64; 4]) -> (Point2, f64) {
+/// size as a fraction of full size, centred below the caption.
+pub(crate) fn projection_symbol_fit(cell: [f64; 4]) -> (Point2, f64) {
     let [x, y, w, h] = cell;
-    if w >= template[2] - 1e-9 && h >= template[3] - 1e-9 {
-        return (Point2::new(x + w / 2.0, y + TEMPLATE_SYMBOL_RISE), 1.0);
-    }
     let (bottom, top) = (y + SYMBOL_MARGIN, y + h - CAPTION_DEPTH - SYMBOL_MARGIN);
     let scale = ((top - bottom) / SYMBOL_SIZE.1).min((w - 2.0 * SYMBOL_MARGIN) / SYMBOL_SIZE.0).min(1.0);
     (Point2::new(x + w / 2.0, (bottom + top) / 2.0), scale)
@@ -863,7 +895,7 @@ fn view_items(drawing: &Drawing, sheet: &Sheet, view: &View, ctx: &Context<'_>, 
     }
     if relationship < lines_out.len() && view.parent().is_some_and(|id| list.display_only_views.contains(&id)) {
         let at = items.len() + relationship;
-        list.display_only_relationships.push(at..at + 1);
+        list.display_only_items.push(at..at + 1);
     }
     for (n, text) in lines_out.into_iter().enumerate() {
         items.push(Item::Text(TextItem {

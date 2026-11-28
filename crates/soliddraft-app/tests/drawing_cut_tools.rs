@@ -545,7 +545,7 @@ fn a_dimension_on_a_section_from_another_sheet_keeps_its_length_when_turned_alig
         .into_iter()
         .max_by(|a, b| (a.2[0] - a.2[1]).abs().total_cmp(&(b.2[0] - b.2[1]).abs()))
         .expect("a horizontal edge");
-    let proposal = propose(&moved, &[Pick { view: id, curve, end: None }], &[]).expect("a proposal");
+    let proposal = propose(&moved, &[Pick { view: id, curve, end: None, at: None }], &[]).expect("a proposal");
     // The whole model edge, though the cut draws only its stretch.
     let length = proposal.distance(LinearOrientation::Horizontal, scale);
     assert!(length >= (ends[0] - ends[1]).abs() / scale - 1e-6, "{length}");
@@ -633,7 +633,18 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
             })
             .unwrap_or_else(|| panic!("{kind:?}: {:?}", s.message));
         assert_eq!(set.values, [120.0], "{kind:?}");
+        drawing(&mut app, DrawingAction::SetTool(DrawingTool::DimensionSet(kind)));
+        for x in [16.0, 104.0] {
+            click_model(&mut app, front, Vec3::new(x, 0.0, 0.0));
+        }
+        let anchors = &session(&app).draft.anchors;
+        let [left, right] = anchors.as_slice() else { panic!("two retained points for {kind:?}: {anchors:?}") };
+        for (anchor, station) in [(left, 16.0), (right, 104.0)] {
+            let soliddraft_drawing::Attach::Point { at } = anchor.attach else { panic!("an interior pick") };
+            near(at.x, station, 1e-3, "the clicked model station");
+        }
     }
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
     let AnnotationKind::Dimension(mut edited) = dimension.body else { unreachable!() };
     edited.kind =
         soliddraft_drawing::DimensionKind::Linear { orientation: soliddraft_drawing::LinearOrientation::Aligned };

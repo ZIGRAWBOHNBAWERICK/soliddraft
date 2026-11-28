@@ -244,6 +244,10 @@ impl<'k> PartIndex<'k> {
         }
     }
 
+    pub(crate) fn edges_with_faces(&self) -> impl Iterator<Item = (EdgeId, &Curve3, &[FaceId])> {
+        self.edges.iter().map(|edge| (edge.id, &edge.curve, edge.faces.as_slice()))
+    }
+
     /// Every edge of the body with its exact curve.
     pub fn edges(&self) -> impl Iterator<Item = (EdgeId, &Curve3)> {
         self.edges.iter().map(|e| (e.id, &e.curve))

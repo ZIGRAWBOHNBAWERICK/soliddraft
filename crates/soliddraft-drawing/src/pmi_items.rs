@@ -31,7 +31,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use kurbo::Shape as _;
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::drawing::Curve3;
 use soliddraft_kernel_api::pmi::{At, PmiKind, PositionFrame, SizeKind, TargetArea, TargetKind, Tolerance};
@@ -46,7 +45,7 @@ use crate::display::{self, Item, Owner};
 use crate::ids::{AnnotationId, ViewId};
 use crate::measure::{AnchorGeometry, anchor_point, precision_for};
 use crate::model_items::plane_edge;
-use crate::part::{Entity, Part, PartIndex, round};
+use crate::part::{Entity, Part, PartIndex, Resolution, round};
 use crate::project::{ViewContext, ViewTransform};
 use crate::{Drawing, DrawingError};
 
@@ -167,8 +166,8 @@ struct PmiView<'a> {
 
 impl PmiView<'_> {
     fn plane_edge(&self, body: &Body<'_>, feature: &[FaceId], point: Vec3, normal: Vec3) -> Option<(EdgeId, bool)> {
-        plane_edge(body.index, self.ctx, point, normal, body.tol, self.leg, |edge| {
-            body.index.entity_on_faces(Entity::Edge(edge), feature)
+        plane_edge(body.index, self.ctx, point, normal, body.tol, self.leg, |faces| {
+            faces.iter().any(|face| feature.contains(face))
         })
     }
 
@@ -1327,19 +1326,19 @@ fn shows<F>(body: &AnnotationKind, kind: &PmiKind<F>) -> bool {
 /// longer has, or that no longer applies, is taken off the drawing. One whose item is now
 /// shown another way, as a size that became a thread or a thread that became a plain
 /// size, is taken off too when `redraw` says [`import`] runs next to draw the item again
-/// as it is; otherwise it stays as it was until then. Returns the names of the items
-/// taken off for good.
+/// as it is; otherwise it stays as it was until then.
 pub(crate) fn refresh(
     drawing: &mut Drawing,
     part: &Part,
+    index: &PartIndex,
     refresh_view: impl Fn(ViewId) -> bool,
     redraw: bool,
-) -> Vec<String> {
+) -> BTreeSet<String> {
     let all = &part.requirements.rows;
     let rows: BTreeMap<&str, &PmiRow> =
         all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
     let notes = &part.requirements.notes.notes;
-    let mut removed = Vec::new();
+    let mut retargeted = BTreeSet::new();
     let mut thread_notes = BTreeMap::new();
     if redraw {
         for annotation in drawing.sheets.iter().flat_map(|sheet| &sheet.annotations) {
@@ -1370,8 +1369,23 @@ pub(crate) fn refresh(
                 return true;
             }
             let Some(source) = annotation.source.clone() else { return true };
-            let mut redrawn = false;
-            let keep = match &source {
+            if let PmiSource::Item { item } = &source
+                && rows.get(item.as_str()).is_some_and(|row| row.applies())
+            {
+                let entities: Vec<_> = annotation
+                    .anchors
+                    .iter()
+                    .map(|anchor| match index.resolve(&anchor.entity) {
+                        Resolution::Found(entity) => Some(entity),
+                        Resolution::Lost(_) => None,
+                    })
+                    .collect();
+                if entities.iter().any(Option::is_none) || !anchors_on_item(annotation, &entities, part, index) {
+                    retargeted.insert(item.clone());
+                    return false;
+                }
+            }
+            match &source {
                 PmiSource::Notes => {
                     if let AnnotationKind::Note { text, .. } = &mut annotation.body {
                         *text = notes_text(&heading, notes);
@@ -1397,7 +1411,6 @@ pub(crate) fn refresh(
                                         | PmiKind::FaceNote { .. }
                                 ) =>
                         {
-                            redrawn = true;
                             false
                         }
                         Some((row, placement)) if shows(&annotation.body, &row.item.kind) => {
@@ -1410,26 +1423,14 @@ pub(crate) fn refresh(
                             }
                             true
                         }
-                        Some(_) => {
-                            redrawn = true;
-                            !redraw
-                        }
+                        Some(_) => !redraw,
                         None => false,
                     }
                 }
-            };
-            if !keep
-                && !redrawn
-                && let Some(item) = source.item()
-            {
-                removed.push(item.to_owned());
             }
-            keep
         });
     }
-    removed.sort();
-    removed.dedup();
-    removed
+    retargeted
 }
 
 /// Copies what the part states about an item into the annotation that shows it.
@@ -1510,8 +1511,20 @@ pub fn import(
     index: &PartIndex,
     views: &[ViewContext],
 ) -> Result<PmiReport, DrawingError> {
+    import_matching(drawing, sheet, part, index, views, None)
+}
+
+pub(crate) fn import_matching(
+    drawing: &mut Drawing,
+    sheet: usize,
+    part: &Part,
+    index: &PartIndex,
+    views: &[ViewContext],
+    only: Option<&BTreeSet<String>>,
+) -> Result<PmiReport, DrawingError> {
     let mut report = PmiReport::default();
     let rows = &part.requirements.rows;
+    let targets = || rows.iter().filter(|row| only.is_none_or(|only| only.contains(&row.item.id)));
     if rows.is_empty() {
         return Ok(report);
     }
@@ -1586,7 +1599,7 @@ pub fn import(
     let mut failed: BTreeMap<String, String> = BTreeMap::new();
     for pass in [Pass::Distances, Pass::Sizes, Pass::Rest] {
         planner.pass = pass;
-        for row in rows {
+        for row in targets() {
             if present.contains(row.item.id.as_str()) || failed.contains_key(&row.item.id) {
                 continue;
             }
@@ -1604,7 +1617,7 @@ pub fn import(
             planner.stack();
         }
     }
-    for row in rows {
+    for row in targets() {
         match failed.remove(&row.item.id) {
             Some(reason) => report.unplaced.push(Unplaced { name: row.item.id.clone(), reason }),
             None if !present.contains(row.item.id.as_str()) => report.placed.push(row.item.id.clone()),
@@ -1719,22 +1732,7 @@ fn points_of(path: &kurbo::BezPath, out: &mut Vec<(f64, f64)>) {
 }
 
 fn text_box(text: &display::TextItem) -> Rect {
-    let width = display::text_width(&text.text, text.height);
-    let (x0, x1) = match text.halign {
-        crate::library::Align::Left => (0.0, width),
-        crate::library::Align::Centre => (-width / 2.0, width / 2.0),
-        crate::library::Align::Right => (-width, 0.0),
-    };
-    let (y0, y1) = match text.valign {
-        display::VAlign::Bottom => (0.0, text.height),
-        display::VAlign::Centre => (-text.height / 2.0, text.height / 2.0),
-        display::VAlign::Top => (-text.height, 0.0),
-    };
-    let mut path = kurbo::Rect::new(x0 - CLEAR, y0 - CLEAR, x1 + CLEAR, y1 + CLEAR).to_path(0.1);
-    path.apply_affine(
-        kurbo::Affine::translate((text.pos.u, text.pos.v)) * kurbo::Affine::rotate(text.angle.to_radians()),
-    );
-    let b = path.bounding_box();
+    let b = text.bounds(CLEAR);
     Rect { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 }
 }
 

@@ -85,19 +85,46 @@ fn snap_centre(s: &DrawingSession, view: ViewId, p: Point2) -> Point2 {
 
 /// The anchor a pick on a curve makes: the snapped end, a round's centre, or the
 /// curve's middle.
-fn anchor_from_hit(s: &DrawingSession, hit: Hit) -> Option<(ViewId, Anchor)> {
+pub(super) fn anchor_from_hit(
+    s: &mut DrawingSession,
+    doc: &Document,
+    hit: Hit,
+    pointer: Point2,
+) -> Option<(ViewId, Anchor)> {
     let Owner::Curve(view, index) = hit.owner else { return None };
+    let v = s.sheet().view(view)?;
+    let broken = !v.geometry.breaks.is_empty();
+    let model = broken || v.geometry.curves.get(index)?.source.section_leg != 0;
+    if model && !cache_picking(s, doc, view) {
+        return None;
+    }
     let v = s.sheet().view(view)?;
     let c = v.geometry.curves.get(index)?;
     let circles = s.doc.circles.get(&view).map(Vec::as_slice).unwrap_or_default();
     let shape = shape_of_curve(c, circles);
     // A circle's start is where its path begins, not a corner: the centre wins.
     let (attach, at) = match (&shape, hit.end) {
+        (_, None) if broken => (Attach::Mid, to_view(s, view, pointer)),
         (CurveShape::Circle { centre, .. }, _) => (Attach::Centre, *centre),
         (_, Some(end)) => (end, soliddraft_drawing::measure::endpoint(c, shape, end)),
         _ => (Attach::Mid, shape.mid()),
     };
-    Some((view, Anchor { entity: c.source.clone(), attach, cached: at }))
+    let mut anchor = Anchor { entity: c.source.clone(), attach, cached: at };
+    if model
+        && !with_part(doc, |_, index| {
+            Ok(soliddraft_drawing::measure::place_model_pick(
+                index,
+                &s.doc.transforms[&view],
+                &mut anchor,
+                c,
+                Some(to_view(s, view, pointer)),
+            ))
+        })
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    Some((view, anchor))
 }
 
 /// The cutting line across a view through a point of it, horizontal or vertical,
@@ -1068,23 +1095,10 @@ pub(super) fn set_tool(
     if !clicked {
         return;
     }
-    match (on_curve, hit.and_then(|h| anchor_from_hit(s, h))) {
-        (true, Some((view, mut anchor))) => {
+    match (on_curve, hit.and_then(|h| anchor_from_hit(s, doc, h, p))) {
+        (true, Some((view, anchor))) => {
             if s.draft.view.is_some_and(|v| v != view) {
                 s.say("Every point must be in the same view");
-                return;
-            }
-            if (anchor.entity.section_leg != 0 || s.sheet().view(view).is_some_and(|v| !v.geometry.breaks.is_empty()))
-                && !(cache_picking(s, doc, view)
-                    && with_part(doc, |_, index| {
-                        Ok(s.doc
-                            .transforms
-                            .get(&view)
-                            .is_some_and(|xf| soliddraft_drawing::measure::place_model_pick(index, xf, &mut anchor)))
-                    })
-                    .unwrap_or(false))
-            {
-                s.say("Pick edges with measurable model geometry");
                 return;
             }
             if s.draft
@@ -1108,6 +1122,7 @@ pub(super) fn set_tool(
                 )
             });
         }
+        (true, None) => s.say("Pick edges with measurable model geometry"),
         _ => {
             if s.draft.anchors.len() < 2 {
                 s.say("Pick the origin and at least one point first");
@@ -1167,6 +1182,7 @@ fn symbol_annotation(s: &DrawingSession, view: ViewId, anchors: Vec<Anchor>, pla
 #[allow(clippy::too_many_arguments)]
 pub(super) fn symbol_tool(
     s: &mut DrawingSession,
+    doc: &Document,
     sheet2: &Sheet2<'_>,
     lctx: &layout::Context<'_>,
     hit: Option<Hit>,
@@ -1193,11 +1209,14 @@ pub(super) fn symbol_tool(
     if !clicked {
         return;
     }
-    match hit.and_then(|h| anchor_from_hit(s, h)) {
+    match hit.and_then(|h| anchor_from_hit(s, doc, h, p)) {
         Some((view, anchor)) => {
             s.draft.view = Some(view);
             s.draft.anchors = vec![anchor];
             s.say("Click where the symbol goes");
+        }
+        None if matches!(hit, Some(Hit { owner: Owner::Curve(..), .. })) => {
+            s.say("Pick edges with measurable model geometry")
         }
         None if matches!(s.tool, DrawingTool::Gdt | DrawingTool::RevisionSymbol) => {
             let view = view_at(s, p).unwrap_or(SHEET);

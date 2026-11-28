@@ -401,6 +401,12 @@ pub(crate) fn mesh_body(kernel: &dyn Kernel, body: BodyId, params: &Tessellation
 pub(crate) struct Pending(Arc<Mutex<Option<Option<Meshing>>>>);
 
 impl Pending {
+    /// A preview the device has not answered yet, as the browser's stays for a frame or more.
+    #[cfg(test)]
+    pub(crate) fn unanswered() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
     /// `None` while the device has not answered; then the preview, or `None` when it
     /// failed and the caller keeps the CPU route. Taken once.
     pub(crate) fn take(&self) -> Option<Option<Meshing>> {

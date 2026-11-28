@@ -9,6 +9,9 @@
 //! - **The choice** ([`select`]): each occurrence moves to a finer level when its error
 //!   covers more than about a pixel and back after it has stayed under about a tenth of
 //!   one, never past the ceiling the device budget sets ([`budget`]).
+//! - **Faces of a single part** choose the same way, each for itself, among three levels
+//!   the kernel nests in one plan of the part. The kernel counts every face's points
+//!   before it makes a mesh, and the budget settles the levels on those counts.
 //! - **The cache** ([`cache`]): meshes by definition and exact parameters, levels that
 //!   come out the same shared, trimmed to the app's budget.
 //! - **The worker** ([`service`]): tessellation off the interface thread, one kernel
@@ -34,13 +37,13 @@ pub mod select;
 pub mod service;
 pub mod settings;
 
-pub use budget::{DeviceBudget, Usage};
+pub use budget::{DeviceBudget, FaceDemand, FaceMesh, Granted, Planned, Usage};
 pub use cache::{DisplayCache, Weigh};
 pub use level::Level;
 pub use mesh::{DisplayMesh, MeshFace, SharedMesh};
-pub use policy::{Levels, ParamsKey};
+pub use policy::{Deviations, FaceLevels, Levels, ParamsKey};
 pub use quality::{Advanced, Quality};
 pub use report::{LevelReport, Report, report};
-pub use select::{Choice, Projection, Thresholds};
+pub use select::{Choice, ClipPlane, Projection, Thresholds, View};
 pub use service::{Done, Route, Tessellator};
 pub use settings::{DrawingTolerance, ExportTolerance, QualityOverride, Settings};

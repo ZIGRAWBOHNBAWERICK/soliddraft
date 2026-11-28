@@ -342,9 +342,7 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     let boss_face = topology
         .faces
         .iter()
-        .find(|face| {
-            saved_part.face_ref(face.id).is_some_and(|reference| FaceOrigin::from(&reference) == candidate_boss)
-        })
+        .find(|face| saved_part.face_ref(face.id).is_ok_and(|reference| FaceOrigin::from(&reference) == candidate_boss))
         .expect("the candidate boss face");
     assert!(boss_face.edges.contains(&rim), "the Ø18 dimension is on the boss rim");
     let rim = anchor.entity.clone();
@@ -434,7 +432,7 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     assert_eq!(dimension.kind, soliddraft_drawing::DimensionKind::Radius);
     assert_eq!(dimension.value, DimValue::Measured { value: 4.0 });
     use soliddraft_kernel_api::pmi::{Anchor, At, PmiItem};
-    let hole = |x| {
+    let hole = |x: f64| {
         topology
             .faces
             .iter()

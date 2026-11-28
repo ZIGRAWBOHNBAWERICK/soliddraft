@@ -755,7 +755,7 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
         let index = soliddraft_drawing::PartIndex::build(&part).unwrap();
         let v = view(&app, top);
         let xf = v.geometry.transform.unwrap();
-        let pick = |x, rim| {
+        let pick = |x: f64, rim: f64| {
             let at = xf.point(Vec3::new(rim, 23.0, 10.0));
             let curve = v.geometry.curves.iter().position(|c| {
                 c.visible && c.kind == CurveKind::Edge

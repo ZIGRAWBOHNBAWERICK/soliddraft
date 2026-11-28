@@ -1635,9 +1635,9 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                             } else {
                                 s.set_tool(DrawingTool::Select);
                                 s.say("Reattached; the dimension is measured again");
-                                state.push(AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Annotation(
-                                    annotation,
-                                )))));
+                                state.push(crate::state::AppAction::Drawing(DrawingAction::Select(Some(
+                                    DrawingSel::Annotation(annotation),
+                                ))));
                             }
                         }
                     }

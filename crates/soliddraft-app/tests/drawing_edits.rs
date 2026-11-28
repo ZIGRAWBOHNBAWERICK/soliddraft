@@ -29,7 +29,7 @@ fn drawing(doc: &Document) -> DrawingDoc {
         views: soliddraft_drawing::default_views(&template),
         template,
         model: soliddraft_drawing::DocRef::new(
-            soliddraft_drawing::DocumentId::new(),
+            ctx.id,
             soliddraft_drawing::DocKind::Part,
             "part.dwprt",
             ctx.digest.clone(),

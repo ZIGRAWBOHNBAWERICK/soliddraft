@@ -121,13 +121,46 @@ impl<'a> Body<'a> {
         let from = self.end(from).ok()?;
         let to = self.end(to).ok()?;
         let (direction, towards) = linear_axis(&from, &to)?;
+        // The dimension still lies the way it would be drawn in this view now.
+        let frame = ctx.xf.in_leg(first.entity.section_leg).frame;
+        let orientation = if direction.dot(frame.right).abs() > 1.0 - 1e-6 {
+            LinearOrientation::Horizontal
+        } else if direction.dot(frame.up).abs() > 1.0 - 1e-6 {
+            LinearOrientation::Vertical
+        } else {
+            return Some(false);
+        };
+        if !matches!(&annotation.body, AnnotationKind::Dimension(d) if d.kind == (DimensionKind::Linear { orientation }))
+        {
+            return Some(false);
+        }
         let matches = |anchor: &Anchor, end: &End, sign| {
             let leg = anchor.entity.section_leg;
             let view = PmiView { ctx, id: ctx.id, xf: ctx.xf.in_leg(leg), leg };
             let (_, _, wanted, _, _) = self.end_anchor(end, &view, direction, sign, None)?;
-            let axis = unit(view.xf.vector(direction));
-            let delta = (wanted.u - anchor.cached.u) * axis.u + (wanted.v - anchor.cached.v) * axis.v;
-            Some(delta.abs() <= 1e-6 * view.xf.scale + 1e-6)
+            let (du, dv) = (wanted.u - anchor.cached.u, wanted.v - anchor.cached.v);
+            let off = match end.shape {
+                // A flat end may sit anywhere along its edge: only its place along the
+                // measuring direction counts.
+                Shape::Plane { .. } => {
+                    let axis = unit(view.xf.vector(direction));
+                    (du * axis.u + dv * axis.v).abs()
+                }
+                // A round end has one station, on any of its rims: only a shift along
+                // the round's own axis is free.
+                Shape::Round { axis, .. } => {
+                    let along = view.xf.vector(axis);
+                    let length = along.u.hypot(along.v);
+                    if length > 1e-9 * view.xf.scale {
+                        let (u, v) = (along.u / length, along.v / length);
+                        let slide = du * u + dv * v;
+                        (du - slide * u).hypot(dv - slide * v)
+                    } else {
+                        du.hypot(dv)
+                    }
+                }
+            };
+            Some(off <= 1e-6 * view.xf.scale + 1e-6)
         };
         Some(matches(first, &from, towards)? && matches(second, &to, -towards)?)
     }

@@ -1116,3 +1116,134 @@ fn mixed_sheet_reference_dimensions_use_the_owning_sheets_style() {
     assert_eq!(DrawingDoc::dimension_text(&drawing.sheets[0], &dim), "120");
     assert_eq!(DrawingDoc::dimension_text(&drawing.sheets[1], &dim), "(120)");
 }
+
+#[test]
+fn a_rebuilt_hole_spacing_follows_holes_that_move_across_it_or_turn() {
+    use soliddraft_app::drawing::part::PartContext;
+    use soliddraft_drawing::{AnnotationState, DimensionKind, Drawing, LinearOrientation};
+    use soliddraft_kernel_api::SurfaceKind;
+    use soliddraft_kernel_api::pmi::{Anchor, At, PmiItem, PmiKind, Tolerance};
+    fn spacing<F: Clone>(name: &str, ends: &[F; 2], from_at: At, to_at: At) -> PmiItem<F> {
+        PmiItem {
+            id: name.into(),
+            kind: PmiKind::Location {
+                from: Anchor { feature: vec![ends[0].clone()], at: from_at },
+                to: Anchor { feature: vec![ends[1].clone()], at: to_at },
+                tolerance: Tolerance::None,
+                nominal: None,
+            },
+        }
+    }
+    // The sample bracket's four 9 mm holes are at x 25 and 115, y 23 and 67, in Sketch5.
+    let mut doc = bracket();
+    let hole = |doc: &Document, x: f64, y: f64| {
+        let topology = doc.kernel().topology(doc.model().body().unwrap()).unwrap();
+        let face = topology
+            .faces
+            .iter()
+            .find(|face| {
+                face.surface == SurfaceKind::Cylinder
+                    && (face.centroid.x - x).abs() < 1e-6
+                    && (face.centroid.y - y).abs() < 1e-6
+            })
+            .expect("a hole")
+            .id;
+        doc.model().face_ref(face).unwrap()
+    };
+    let lower = [hole(&doc, 25.0, 23.0), hole(&doc, 115.0, 23.0)];
+    let upper = [hole(&doc, 25.0, 67.0), hole(&doc, 115.0, 67.0)];
+    let (moved, control) = ("Lower hole spacing", "Upper hole spacing");
+    // Near side of the first hole to the far side of the second: each end is a station on a rim.
+    doc.put_pmi(spacing(moved, &lower, At::Inner, At::Outer), None).unwrap();
+    doc.put_pmi(spacing(control, &upper, At::Inner, At::Outer), None).unwrap();
+    let mut drawing = {
+        let context = PartContext::new(&doc).expect("the bracket has a body");
+        let part = context.part();
+        let request = soliddraft_drawing::NewDrawing {
+            template: soliddraft_drawing::Template::by_id("iso-a3").unwrap(),
+            views: vec![soliddraft_kernel_api::drawing::StandardView::Top],
+            model: soliddraft_drawing::DocRef::new(
+                context.id,
+                soliddraft_drawing::DocKind::Part,
+                "bracket.dwprt",
+                part.digest.clone(),
+            ),
+            meta: Default::default(),
+            hidden: soliddraft_drawing::HiddenLines::Visible,
+            model_items: false,
+            centre_marks: false,
+            requirements: true,
+            scale: None,
+        };
+        soliddraft_drawing::make_drawing(&part, &request).unwrap().drawing
+    };
+    let rebuild = |drawing: &mut Drawing, doc: &Document| {
+        let context = PartContext::new(doc).expect("the bracket has a body");
+        soliddraft_drawing::update_from_model(drawing, &context.part()).unwrap();
+    };
+    let place = |drawing: &Drawing, name: &str| {
+        soliddraft_drawing::review::place_of_item(drawing, name).expect("the spacing is drawn").annotation
+    };
+    let shows = |drawing: &Drawing, name: &str, orientation: LinearOrientation, value: f64, stations: [[f64; 2]; 2]| {
+        let annotation = drawing.annotation(place(drawing, name)).unwrap();
+        assert_eq!(annotation.state, AnnotationState::Ok, "{name}");
+        let AnnotationKind::Dimension(dimension) = &annotation.body else { panic!("{name} is a dimension") };
+        assert_eq!(dimension.kind, DimensionKind::Linear { orientation }, "{name}");
+        assert!(
+            matches!(dimension.value, DimValue::Measured { value: shown } if (shown - value).abs() < 1e-6),
+            "{name} reads {:?}, not {value}",
+            dimension.value
+        );
+        let xf = drawing.view(annotation.view).unwrap().geometry.transform.unwrap();
+        assert_eq!(annotation.anchors.len(), 2, "{name}");
+        for (anchor, [x, y]) in annotation.anchors.iter().zip(stations) {
+            let at = xf.unproject(anchor.cached);
+            assert!(
+                (at.x - x).abs() < 1e-5 && (at.y - y).abs() < 1e-5,
+                "{name}: an extension line starts at {}, {} and not at {x}, {y}",
+                at.x,
+                at.y
+            );
+        }
+    };
+    let holes = doc.features.iter().find(|f| f.name == "Sketch5").unwrap().id;
+    let move_lower = |doc: &mut Document, first: P2, second: P2| {
+        let all = [first, P2::new(25.0, 67.0), second, P2::new(115.0, 67.0)].map(|centre| (centre, 4.5));
+        doc.apply(Command::EditSketch { id: holes, sketch: circles(&all) }).unwrap();
+    };
+    shows(&drawing, moved, LinearOrientation::Horizontal, 90.0, [[29.5, 23.0], [119.5, 23.0]]);
+    shows(&drawing, control, LinearOrientation::Horizontal, 90.0, [[29.5, 67.0], [119.5, 67.0]]);
+    let (moved_at_first, control_at_first) = (place(&drawing, moved), place(&drawing, control));
+
+    // A rebuild with nothing changed keeps both annotations.
+    rebuild(&mut drawing, &doc);
+    assert_eq!((place(&drawing, moved), place(&drawing, control)), (moved_at_first, control_at_first));
+
+    // The lower pair moves 8 mm across the measured direction. Its spacing is drawn again
+    // on the moved rims; the upper pair's is the annotation it was.
+    move_lower(&mut doc, P2::new(25.0, 31.0), P2::new(115.0, 31.0));
+    rebuild(&mut drawing, &doc);
+    shows(&drawing, moved, LinearOrientation::Horizontal, 90.0, [[29.5, 31.0], [119.5, 31.0]]);
+    shows(&drawing, control, LinearOrientation::Horizontal, 90.0, [[29.5, 67.0], [119.5, 67.0]]);
+    assert_ne!(place(&drawing, moved), moved_at_first, "the moved spacing is drawn again");
+    assert_eq!(place(&drawing, control), control_at_first, "the unchanged spacing stays");
+
+    // Centre to centre, then the second lower hole moves above the first: the spacing
+    // turns upright with its new value.
+    doc.put_pmi(spacing(moved, &lower, At::Feature, At::Feature), Some(moved.into())).unwrap();
+    rebuild(&mut drawing, &doc);
+    shows(&drawing, moved, LinearOrientation::Horizontal, 90.0, [[25.0, 31.0], [115.0, 31.0]]);
+    move_lower(&mut doc, P2::new(25.0, 31.0), P2::new(25.0, 45.0));
+    rebuild(&mut drawing, &doc);
+    shows(&drawing, moved, LinearOrientation::Vertical, 14.0, [[25.0, 31.0], [25.0, 45.0]]);
+    shows(&drawing, control, LinearOrientation::Horizontal, 90.0, [[29.5, 67.0], [119.5, 67.0]]);
+    assert_eq!(place(&drawing, control), control_at_first, "the unchanged spacing stays");
+
+    // The reopened drawing says the same.
+    let meta = soliddraft_drawing::file::FileMeta::new("test", drawing.meta.units);
+    let (saved, _) =
+        soliddraft_drawing::file::from_bytes(&soliddraft_drawing::file::to_bytes(&drawing, &meta).unwrap()).unwrap();
+    shows(&saved, moved, LinearOrientation::Vertical, 14.0, [[25.0, 31.0], [25.0, 45.0]]);
+    shows(&saved, control, LinearOrientation::Horizontal, 90.0, [[29.5, 67.0], [119.5, 67.0]]);
+    assert_eq!(place(&saved, control), control_at_first);
+}

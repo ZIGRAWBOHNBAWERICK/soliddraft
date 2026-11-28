@@ -298,26 +298,53 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     app.get_by_label("On drawing sheet 1");
     review_value(&app, "Baseline", "Ø8 H7");
     review_value(&app, "Candidate", "Ø8 H8");
+    assert!(review.draft().is_some_and(|draft| !draft.text.trim().is_empty()) && review.place().is_some());
+    for (path, before) in [&baseline, &candidate, &drawing_path].into_iter().zip(&sources) {
+        let error = session(&app).review.as_ref().unwrap().save_markup(path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        drawing(&mut app, DrawingAction::SaveMarkup(Some(path.clone())));
+        let notice = app.state().state.note.as_ref().expect("the save reports the existing file");
+        assert_eq!(notice.kind, soliddraft_app::state::NoteKind::Error);
+        assert!(notice.text.contains(&error.to_string()), "{}", notice.text);
+        assert_eq!(&std::fs::read(path).unwrap(), before, "{} is as it was", path.display());
+    }
     for (row, was, now) in [
         ("Changed · Bore note", "Hone after boring", "Hone to size after boring"),
+        ("Changed · Boss diameter", "Ø16 ±0.1", "Ø18 ±0.1"),
         ("Removed · Boss note", "Deburr the boss rim", "Item not present"),
     ] {
         app.get_by_label(row).click();
         app.run_steps(2);
         review_value(&app, "Baseline", was);
         review_value(&app, "Candidate", now);
+        if row == "Changed · Boss diameter" {
+            app.get_by_label("Candidate − baseline: +2 mm");
+        }
     }
 
-    // Reattached to the boss rim, the bore annotation no longer shows the bore diameter,
-    // so a comment on that item does not go on it.
-    let rim = session(&app).doc.drawing.sheets[0]
-        .annotations
+    let reopened = &session(&app).doc.drawing;
+    let boss = reopened
+        .sheets
         .iter()
-        .find(|a| a.source == Some(PmiSource::Item { item: "Boss diameter".into() }))
-        .expect("the drawing shows the boss diameter")
-        .anchors[0]
-        .entity
-        .clone();
+        .flat_map(|sheet| &sheet.annotations)
+        .find(|a| a.source.as_ref().and_then(PmiSource::item) == Some("Boss diameter"))
+        .expect("the reopened drawing shows the boss diameter");
+    let AnnotationKind::Dimension(dimension) = &boss.body else { panic!("a boss diameter") };
+    assert_eq!(dimension.kind, soliddraft_drawing::DimensionKind::Diameter);
+    assert_eq!(dimension.value, DimValue::Measured { value: 18.0 });
+    assert_eq!(dimension.tolerance, Tolerance::parse("±0.1").unwrap());
+    let [anchor] = boss.anchors.as_slice() else { panic!("one boss rim anchor") };
+    let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else { panic!("a model edge") };
+    let rim = saved_part.resolve_edge(reference, body).unwrap();
+    let boss_face = topology
+        .faces
+        .iter()
+        .find(|face| {
+            saved_part.face_ref(face.id).is_some_and(|reference| FaceOrigin::from(&reference) == candidate_boss)
+        })
+        .expect("the candidate boss face");
+    assert!(boss_face.edges.contains(&rim), "the Ø18 dimension is on the boss rim");
+    let rim = anchor.entity.clone();
     drawing(&mut app, DrawingAction::Command(Command::Reattach { annotation: bore, end: 0, entity: rim }));
     let moved = session(&app).doc.drawing.annotation(bore).expect("the annotation stays on the sheet");
     assert_eq!(moved.state, AnnotationState::Ok);
@@ -386,8 +413,6 @@ fn a_drawing_review_compares_bracket_revisions_and_reopens_its_markup_on_that_dr
     drawing(&mut app, DrawingAction::ReviewRevisions(Some(baseline.clone())));
     assert!(session(&app).review.is_some(), "the saved drawing still opens review for revision B");
 
-    // A second save of the same comment is refused, and no source changed.
-    drawing(&mut app, DrawingAction::SaveMarkup(Some(drawing_path.clone())));
     for (path, before) in [&baseline, &candidate, &drawing_path].into_iter().zip(&sources) {
         assert_eq!(&std::fs::read(path).unwrap(), before, "{} is as it was", path.display());
     }

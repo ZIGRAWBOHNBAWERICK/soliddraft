@@ -228,7 +228,21 @@ fn offset_aligned_half_and_broken_views_from_the_drawing_tools() {
     click_model(&mut app, top, first);
     click_model(&mut app, top, Vec3::new(115.0, 67.0, 10.0));
     assert!(session(&app).draft.pending.is_none());
+    let mut other = bracket();
+    assert_ne!(other.model().id(), app.state().state.doc.model().id());
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
+    drawing(&mut app, DrawingAction::FinishCut);
+    assert!(session(&app).draft.pending.is_none());
+    assert!(session(&app).message.as_ref().is_some_and(|(text, _)| text.contains("not the one this drawing shows")));
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
     click_label(&mut app, "Finish cutting line");
+    let pending = session(&app).draft.pending.as_ref().unwrap().view.id;
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
+    let position = view(&app, top).position;
+    let at = session(&app).screen_of(Point2::new(position.u + 160.0, position.v));
+    click_at(&mut app, at);
+    assert!(session(&app).doc.drawing.view(pending).is_none());
+    std::mem::swap(&mut app.state_mut().state.doc, &mut other);
     place_right_of(&mut app, top, 160.0);
     let offset = sections(&app).pop().expect("an offset section");
     let ViewKind::Section { line, model_line, .. } = &offset.kind else { unreachable!() };
@@ -639,9 +653,10 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
         }
         let anchors = &session(&app).draft.anchors;
         let [left, right] = anchors.as_slice() else { panic!("two retained points for {kind:?}: {anchors:?}") };
+        let xf = view(&app, front).geometry.transform.unwrap();
         for (anchor, station) in [(left, 16.0), (right, 104.0)] {
-            let soliddraft_drawing::Attach::Point { at } = anchor.attach else { panic!("an interior pick") };
-            near(at.x, station, 1e-3, "the clicked model station");
+            assert!(matches!(anchor.attach, soliddraft_drawing::Attach::EdgeParameter { .. }));
+            near(xf.unproject(anchor.cached).x, station, 1e-3, "the clicked model station");
         }
     }
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
@@ -662,6 +677,72 @@ fn broken_view_dimensions_measure_the_model_from_native_picks() {
             .unwrap();
     let entities = soliddraft_drawing::export::dxf::count_entities(&dxf).unwrap();
     assert!(entities.get("DIMENSION/DIMENSION").is_some_and(|n| *n >= 4));
+
+    let top = view_named(&app, "Top view");
+    drawing(
+        &mut app,
+        DrawingAction::Command(DrawCommand::SetViewBreaks {
+            view: top,
+            breaks: vec![soliddraft_drawing::Break {
+                from: Vec3::new(40.0, 0.0, 0.0),
+                to: Vec3::new(80.0, 0.0, 0.0),
+                axis: AlignAxis::Horizontal,
+            }],
+        }),
+    );
+    let top_view = view(&app, top);
+    for kind in [SetKind::Ordinate, SetKind::Baseline, SetKind::Chain] {
+        drawing(&mut app, DrawingAction::SetTool(DrawingTool::DimensionSet(kind)));
+        for x in [20.5, 119.5] {
+            click_model(&mut app, top, Vec3::new(x, 23.0, 10.0));
+        }
+        let xf = top_view.geometry.transform.unwrap();
+        let anchors = &session(&app).draft.anchors;
+        let [left, right] = anchors.as_slice() else { panic!("two hole picks for {kind:?}: {anchors:?}") };
+        for (anchor, x) in [(left, 25.0), (right, 115.0)] {
+            assert_eq!(anchor.attach, soliddraft_drawing::Attach::Centre);
+            near(xf.unproject(anchor.cached).x, x, 1e-5, "the hole centre");
+        }
+        let place = session(&app)
+            .screen_of(Point2::new(top_view.position.u, top_view.position.v + top_view.geometry.bbox[3] + 12.0));
+        click_at(&mut app, place);
+        let set = session(&app)
+            .sheet()
+            .annotations
+            .iter()
+            .find_map(|annotation| match &annotation.body {
+                AnnotationKind::DimensionSet(set) if annotation.view == top && set.kind == kind => Some(set),
+                _ => None,
+            })
+            .expect("the hole spacing is placed");
+        assert_eq!(set.values, [90.0], "{kind:?}");
+    }
+
+    let broken = view(&app, front);
+    let silhouette = broken
+        .geometry
+        .curves
+        .iter()
+        .find(|curve| curve.visible && curve.kind == CurveKind::Silhouette)
+        .expect("the boss has a visible silhouette on the front view");
+    let at = soliddraft_drawing::measure::shape_of(&silhouette.path).mid();
+    let click = session(&app).screen_of(Point2::new(broken.position.u + at.u, broken.position.v + at.v));
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Note));
+    click_at(&mut app, click);
+    let note = session(&app)
+        .sheet()
+        .annotations
+        .iter()
+        .rev()
+        .find(|a| a.view == front && matches!(a.body, AnnotationKind::Note { .. }))
+        .unwrap();
+    assert_eq!(note.anchors[0].entity, silhouette.source);
+    near(note.anchors[0].cached.u, at.u, 1e-3, "the note leader touches the retained silhouette");
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::SurfaceFinish));
+    click_at(&mut app, click);
+    let [anchor] = session(&app).draft.anchors.as_slice() else { panic!("the finish can pick the silhouette") };
+    assert_eq!(anchor.entity, silhouette.source);
+    near(anchor.cached.u, at.u, 1e-3, "the finish leader touches the retained silhouette");
     drop(app);
     std::fs::remove_dir_all(&root).unwrap();
 }

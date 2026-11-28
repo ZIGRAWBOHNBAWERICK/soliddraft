@@ -41,6 +41,7 @@ pub fn anchor_point(a: &AnchorGeometry, xf: &ViewTransform, across: Point2) -> V
         Attach::Start => curve.start(),
         Attach::End => curve.end(),
         Attach::Mid | Attach::Silhouette => curve.point_at(0.5),
+        Attach::EdgeParameter { t } => curve.point_at(t),
         Attach::Centre => match curve {
             Curve3::Arc { center, .. } | Curve3::Circle { center, .. } => *center,
             _ => curve.point_at(0.5),
@@ -95,19 +96,27 @@ pub fn place_model_pick(
     at: Option<Point2>,
 ) -> bool {
     if anchor.attach == Attach::Mid && !xf.breaks.is_empty() {
-        let Some(at) = interior_model_pick(index, xf, drawn, at.unwrap_or(anchor.cached)) else { return false };
-        anchor.attach = Attach::Point { at };
+        let Some(t) = interior_model_pick(index, xf, drawn, at.unwrap_or(anchor.cached)) else { return false };
+        anchor.attach = Attach::EdgeParameter { t };
     }
     let Some(at) = resolve_model_pick(index, xf, anchor) else { return false };
     anchor.cached = xf.point(at);
     true
 }
 
-fn interior_model_pick(index: &PartIndex, xf: &ViewTransform, drawn: &crate::Curve2, at: Point2) -> Option<Vec3> {
+fn interior_model_pick(index: &PartIndex, xf: &ViewTransform, drawn: &crate::Curve2, at: Point2) -> Option<f64> {
     let Resolution::Found(Entity::Edge(edge)) = index.resolve(&drawn.source) else { return None };
     let curve = index.edge_curve(edge)?;
     let xf = xf.in_leg(drawn.source.section_leg);
-    crate::project::point_on_drawn_edge(&xf, curve, at, drawn.path.segments())
+    crate::project::parameter_on_drawn_edge(&xf, curve, at, drawn.path.segments())
+}
+
+/// Places a leader on the drawn curve, including a face-backed silhouette.
+pub fn retained_leader(drawn: &crate::Curve2, xf: Option<&ViewTransform>, at: Point2) -> Option<Anchor> {
+    let cached = crate::project::nearest_drawn_point(at, drawn.path.segments())?;
+    let attach =
+        xf.map_or(Attach::Mid, |xf| Attach::Point { at: xf.in_leg(drawn.source.section_leg).unproject(cached) });
+    Some(Anchor { entity: drawn.source.clone(), attach, cached })
 }
 
 /// The direction extension lines of a dimension run in, in the view: across the
@@ -168,12 +177,7 @@ pub fn measure(kind: &DimensionKind, dim_type: DimType, anchors: &[AnchorGeometr
                 (len > 0.0).then(|| Point2::new(v.u / len, v.v / len))
             };
             let (a, b) = (dir(anchors.first()?)?, dir(anchors.get(1)?)?);
-            let cos = a.u * b.u + a.v * b.v;
-            Some(if anchors.iter().all(|anchor| anchor.attach == Attach::Mid) {
-                acute_angle(cos)
-            } else {
-                cos.clamp(-1.0, 1.0).acos().to_degrees()
-            })
+            Some(acute_angle(a.u * b.u + a.v * b.v))
         }
         DimensionKind::Chamfer => chamfer(anchors, xf).map(|(size, _)| size),
         DimensionKind::Ordinate => None,
@@ -539,7 +543,7 @@ pub fn propose_model(view: &View, picks: &[Pick], index: &PartIndex, xf: &ViewTr
             let pick = picks.get(i)?;
             let drawn = view.geometry.curves.get(pick.curve)?;
             let at = pick.at.unwrap_or_else(|| shape_of(&drawn.path).mid());
-            anchor.attach = Attach::Point { at: interior_model_pick(index, xf, drawn, at)? };
+            anchor.attach = Attach::EdgeParameter { t: interior_model_pick(index, xf, drawn, at)? };
         }
         let point = resolve_model_pick(index, xf, anchor)?;
         anchor.cached = xf.point(point);

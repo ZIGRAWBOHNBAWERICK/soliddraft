@@ -1333,12 +1333,11 @@ pub(crate) fn refresh(
     index: &PartIndex,
     refresh_view: impl Fn(ViewId) -> bool,
     redraw: bool,
-) -> BTreeSet<String> {
+) {
     let all = &part.requirements.rows;
     let rows: BTreeMap<&str, &PmiRow> =
         all.iter().filter(|row| row.feature.is_none()).map(|row| (row.item.id.as_str(), row)).collect();
     let notes = &part.requirements.notes.notes;
-    let mut retargeted = BTreeSet::new();
     let mut thread_notes = BTreeMap::new();
     if redraw {
         for annotation in drawing.sheets.iter().flat_map(|sheet| &sheet.annotations) {
@@ -1369,7 +1368,8 @@ pub(crate) fn refresh(
                 return true;
             }
             let Some(source) = annotation.source.clone() else { return true };
-            if let PmiSource::Item { item } = &source
+            if redraw
+                && let PmiSource::Item { item } = &source
                 && rows.get(item.as_str()).is_some_and(|row| row.applies())
             {
                 let entities: Vec<_> = annotation
@@ -1381,7 +1381,6 @@ pub(crate) fn refresh(
                     })
                     .collect();
                 if entities.iter().any(Option::is_none) || !anchors_on_item(annotation, &entities, part, index) {
-                    retargeted.insert(item.clone());
                     return false;
                 }
             }
@@ -1430,7 +1429,6 @@ pub(crate) fn refresh(
             }
         });
     }
-    retargeted
 }
 
 /// Copies what the part states about an item into the annotation that shows it.
@@ -1511,20 +1509,8 @@ pub fn import(
     index: &PartIndex,
     views: &[ViewContext],
 ) -> Result<PmiReport, DrawingError> {
-    import_matching(drawing, sheet, part, index, views, None)
-}
-
-pub(crate) fn import_matching(
-    drawing: &mut Drawing,
-    sheet: usize,
-    part: &Part,
-    index: &PartIndex,
-    views: &[ViewContext],
-    only: Option<&BTreeSet<String>>,
-) -> Result<PmiReport, DrawingError> {
     let mut report = PmiReport::default();
     let rows = &part.requirements.rows;
-    let targets = || rows.iter().filter(|row| only.is_none_or(|only| only.contains(&row.item.id)));
     if rows.is_empty() {
         return Ok(report);
     }
@@ -1599,7 +1585,7 @@ pub(crate) fn import_matching(
     let mut failed: BTreeMap<String, String> = BTreeMap::new();
     for pass in [Pass::Distances, Pass::Sizes, Pass::Rest] {
         planner.pass = pass;
-        for row in targets() {
+        for row in rows {
             if present.contains(row.item.id.as_str()) || failed.contains_key(&row.item.id) {
                 continue;
             }
@@ -1617,7 +1603,7 @@ pub(crate) fn import_matching(
             planner.stack();
         }
     }
-    for row in targets() {
+    for row in rows {
         match failed.remove(&row.item.id) {
             Some(reason) => report.unplaced.push(Unplaced { name: row.item.id.clone(), reason }),
             None if !present.contains(row.item.id.as_str()) => report.placed.push(row.item.id.clone()),

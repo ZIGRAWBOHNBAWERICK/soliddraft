@@ -390,12 +390,13 @@ impl ViewContext {
         preferred: Vec3,
     ) -> Option<Vec3> {
         let xf = self.xf.in_leg(leg);
-        point_on_drawn_edge(
+        parameter_on_drawn_edge(
             &xf,
             curve,
             xf.precise_point(preferred),
             self.projected_edges(edge, leg).flat_map(|c| c.path.segments()),
         )
+        .map(|t| curve.point_at(t))
     }
 
     /// The kernel request the view was made with.
@@ -416,12 +417,7 @@ pub fn compute_in(
     compute_with_previous(drawing, part, index, id, memo, None)
 }
 
-pub(crate) fn point_on_drawn_edge(
-    xf: &ViewTransform,
-    curve: &Curve3,
-    preferred: Point2,
-    segments: impl Iterator<Item = kurbo::PathSeg>,
-) -> Option<Vec3> {
+pub(crate) fn nearest_drawn_point(preferred: Point2, segments: impl Iterator<Item = kurbo::PathSeg>) -> Option<Point2> {
     use kurbo::ParamCurveNearest as _;
     let q = Point::new(preferred.u, preferred.v);
     let p = segments
@@ -431,26 +427,38 @@ pub(crate) fn point_on_drawn_edge(
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))?
         .1;
-    let model = xf.unproject(Point2::new(p.x, p.y));
+    Some(Point2::new(p.x, p.y))
+}
+
+pub(crate) fn parameter_on_drawn_edge(
+    xf: &ViewTransform,
+    curve: &Curve3,
+    preferred: Point2,
+    segments: impl Iterator<Item = kurbo::PathSeg>,
+) -> Option<f64> {
+    let model = xf.unproject(nearest_drawn_point(preferred, segments)?);
+    parameter_near(curve, model, Some(xf.frame.direction))
+}
+
+pub(crate) fn parameter_near(curve: &Curve3, point: Vec3, direction: Option<Vec3>) -> Option<f64> {
+    let flatten = |v: Vec3| direction.map_or(v, |n| v - n * v.dot(n));
     let samples = curve.sample_params(1e-4);
-    let (_, t) = samples
+    samples
         .windows(2)
         .filter_map(|pair| {
             let [(lo, a), (hi, b)] = pair else { return None };
-            let ab = *b - *a;
-            let planar = ab - xf.frame.direction * ab.dot(xf.frame.direction);
+            let planar = flatten(*b - *a);
             let length = planar.dot(planar);
             if length <= 1e-12 {
                 return None;
             }
-            let offset = model - *a;
+            let offset = flatten(point - *a);
             let f = (offset.dot(planar) / length).clamp(0.0, 1.0);
             let residual = offset - planar * f;
-            let residual = residual - xf.frame.direction * residual.dot(xf.frame.direction);
             Some((residual.dot(residual), lo + (hi - lo) * f))
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0))?;
-    Some(curve.point_at(t))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, t)| t)
 }
 
 pub(crate) fn compute_with_previous(

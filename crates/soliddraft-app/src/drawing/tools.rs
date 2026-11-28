@@ -94,7 +94,14 @@ pub(super) fn anchor_from_hit(
     let Owner::Curve(view, index) = hit.owner else { return None };
     let v = s.sheet().view(view)?;
     let broken = !v.geometry.breaks.is_empty();
-    let model = broken || v.geometry.curves.get(index)?.source.section_leg != 0;
+    let c = v.geometry.curves.get(index)?;
+    let pointer = to_view(s, view, pointer);
+    let measures = matches!(s.tool, DrawingTool::DimensionSet(_));
+    if broken && !measures {
+        let xf = v.geometry.transform.as_ref().or_else(|| s.doc.transforms.get(&view));
+        return soliddraft_drawing::measure::retained_leader(c, xf, pointer).map(|anchor| (view, anchor));
+    }
+    let model = measures && (broken || c.source.section_leg != 0);
     if model && !cache_picking(s, doc, view) {
         return None;
     }
@@ -104,9 +111,19 @@ pub(super) fn anchor_from_hit(
     let shape = shape_of_curve(c, circles);
     // A circle's start is where its path begins, not a corner: the centre wins.
     let (attach, at) = match (&shape, hit.end) {
-        (_, None) if broken => (Attach::Mid, to_view(s, view, pointer)),
-        (CurveShape::Circle { centre, .. }, _) => (Attach::Centre, *centre),
+        (CurveShape::Circle { centre, radius }, _)
+            if v.geometry.breaks.iter().all(|gap| {
+                let p = match gap.axis {
+                    AlignAxis::Horizontal => centre.u,
+                    AlignAxis::Vertical => centre.v,
+                };
+                p + radius <= gap.at || p - radius >= gap.at + gap.gap
+            }) =>
+        {
+            (Attach::Centre, *centre)
+        }
         (_, Some(end)) => (end, soliddraft_drawing::measure::endpoint(c, shape, end)),
+        (_, None) if broken => (Attach::Mid, pointer),
         _ => (Attach::Mid, shape.mid()),
     };
     let mut anchor = Anchor { entity: c.source.clone(), attach, cached: at };
@@ -117,7 +134,7 @@ pub(super) fn anchor_from_hit(
                 &s.doc.transforms[&view],
                 &mut anchor,
                 c,
-                Some(to_view(s, view, pointer)),
+                Some(pointer),
             ))
         })
         .unwrap_or(false)
@@ -143,6 +160,27 @@ fn pending_of((view, ctx): (soliddraft_drawing::View, project::ViewContext), she
     PendingDerived { view, projected: ctx.projected, sheet }
 }
 
+fn section_source(s: &DrawingSession, doc: &Document, parent: ViewId) -> Result<(), String> {
+    if !s.model_is(doc.model().id()) {
+        return Err("The open part is not the one this drawing shows".into());
+    }
+    let current = super::part::digest(doc);
+    if !s.doc.drawing.view(parent).is_some_and(|view| view.geometry.source_digest == current.as_str()) {
+        return Err("Rebuild the parent view before adding a cutting line".into());
+    }
+    Ok(())
+}
+
+fn pending_section_source(s: &DrawingSession, doc: &Document, pending: &PendingDerived) -> Result<(), String> {
+    if let ViewKind::Section { parent, .. } = pending.view.kind {
+        section_source(s, doc, parent)?;
+        if pending.view.geometry.source_digest != super::part::digest(doc).as_str() {
+            return Err("Draw the section again from the current part".into());
+        }
+    }
+    Ok(())
+}
+
 fn compute_section(
     s: &DrawingSession,
     doc: &Document,
@@ -151,6 +189,7 @@ fn compute_section(
     line: &[Point2],
     flip: bool,
 ) -> Result<PendingDerived, String> {
+    section_source(s, doc, parent)?;
     with_part(doc, |part, index| {
         derived::new_section_along(&s.doc.drawing, part, index, sheet, parent, line, flip, None)
     })
@@ -187,8 +226,12 @@ fn compute_auxiliary(
 }
 
 /// Keeps a computed view for placing, or places it at once on another sheet.
-fn take_pending(s: &mut DrawingSession, pending: PendingDerived, push: &mut impl FnMut(DrawingAction)) {
+fn take_pending(s: &mut DrawingSession, doc: &Document, pending: PendingDerived, push: &mut impl FnMut(DrawingAction)) {
     if pending.sheet != s.sheet {
+        if let Err(error) = pending_section_source(s, doc, &pending) {
+            s.say(error);
+            return;
+        }
         let id = pending.view.id;
         s.doc.remember(id, &pending.projected);
         push(DrawingAction::Command(Command::PlaceView { sheet: pending.sheet, view: pending.view.clone() }));
@@ -225,7 +268,7 @@ pub(super) fn derived_tool(
         return;
     };
     if let Some(pending) = s.draft.pending.clone() {
-        place_pending(s, sheet2, lctx, pending, p, ctrl, clicked, push);
+        place_pending(s, doc, sheet2, lctx, pending, p, ctrl, clicked, push);
         return;
     }
     if clicked {
@@ -362,6 +405,7 @@ fn paint_draft(s: &DrawingSession, sheet2: &Sheet2<'_>, pointer: Option<Point2>)
 #[allow(clippy::too_many_arguments)]
 fn place_pending(
     s: &mut DrawingSession,
+    doc: &Document,
     sheet2: &Sheet2<'_>,
     lctx: &layout::Context<'_>,
     mut pending: PendingDerived,
@@ -407,6 +451,10 @@ fn place_pending(
     };
     card(sheet2.painter, sheet2.s(pending.view.position) + vec2(30.0, -30.0), &name, &line2);
     if clicked {
+        if let Err(error) = pending_section_source(s, doc, &pending) {
+            s.say(error);
+            return;
+        }
         let id = pending.view.id;
         s.doc.remember(id, &pending.projected);
         push(DrawingAction::Command(Command::PlaceView { sheet: pending.sheet, view: pending.view.clone() }));
@@ -459,7 +507,7 @@ fn section_tool(
                 None => match compute_section(s, doc, s.sheet, view, &line, s.draft.flip) {
                     Ok(pending) => {
                         s.draft.points.clear();
-                        take_pending(s, pending, push);
+                        take_pending(s, doc, pending, push);
                     }
                     Err(e) => {
                         s.say(format!("Section: {e}"));
@@ -558,6 +606,10 @@ fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, p
         s.say("Section: click at least two centres for an offset line, three points for an aligned one");
         return;
     }
+    if let Err(error) = section_source(s, doc, view) {
+        s.say(error);
+        return;
+    }
     cache_picking(s, doc, view);
     let Some(xf) = s.doc.transforms.get(&view) else {
         s.say("Rebuild the view before adding a cutting line");
@@ -577,7 +629,7 @@ fn finish_cut(s: &mut DrawingSession, doc: &Document, replace: Option<ViewId>, p
         None => match compute_section(s, doc, s.sheet, view, &line, s.draft.flip) {
             Ok(pending) => {
                 s.draft.points.clear();
-                take_pending(s, pending, push);
+                take_pending(s, doc, pending, push);
             }
             Err(e) => {
                 s.say(format!("Section: {e}"));
@@ -726,9 +778,11 @@ fn redraw_section(
         s.set_tool(DrawingTool::Select);
         return;
     };
-    let model_line = with_part(doc, |part, index| {
-        let ctx = derived::context(&s.doc.drawing, part, index, parent)?;
-        Ok(line.iter().map(|q| ctx.xf.unproject(*q)).collect::<Vec<_>>())
+    let model_line = section_source(s, doc, parent).and_then(|()| {
+        with_part(doc, |part, index| {
+            let ctx = derived::context(&s.doc.drawing, part, index, parent)?;
+            Ok(line.iter().map(|q| ctx.xf.unproject(*q)).collect::<Vec<_>>())
+        })
     });
     match model_line {
         Ok(model_line) => {
@@ -835,7 +889,7 @@ fn finish_detail(s: &mut DrawingSession, doc: &Document, push: &mut impl FnMut(D
     match compute_detail(s, doc, sheet, view, centre, radius, profile, s.draft.factor) {
         Ok(pending) => {
             s.draft.points.clear();
-            take_pending(s, pending, push);
+            take_pending(s, doc, pending, push);
         }
         Err(e) => {
             s.say(format!("Detail: {e}"));
@@ -866,7 +920,7 @@ fn auxiliary_tool(
     s.draft.view = Some(view);
     s.draft.anchors = vec![Anchor { entity: c.source.clone(), attach: Attach::Mid, cached: shape_of(&c.path).mid() }];
     match compute_auxiliary(s, doc, s.sheet, view, c.source.clone(), s.draft.flip) {
-        Ok(pending) => take_pending(s, pending, push),
+        Ok(pending) => take_pending(s, doc, pending, push),
         Err(e) => {
             s.say(format!("Auxiliary view: {e}"));
             s.draft.reset();

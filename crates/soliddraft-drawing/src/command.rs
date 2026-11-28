@@ -446,6 +446,15 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
             {
                 return Err(DrawingError::UnknownView(parent));
             }
+            if let ViewKind::Section { parent, .. } = view.kind
+                && drawing
+                    .view(parent)
+                    .is_some_and(|parent| parent.geometry.source_digest != view.geometry.source_digest)
+            {
+                return Err(DrawingError::BadRequest(
+                    "The section and its parent must come from the same part revision".into(),
+                ));
+            }
             project::validate_break(&view.geometry, view.display, 1.0, !view.breaks.is_empty())?;
             if view.letter().is_some_and(|l| l == drawing.next_view_label) {
                 drawing.next_view_label = next_letter(&drawing.next_view_label);

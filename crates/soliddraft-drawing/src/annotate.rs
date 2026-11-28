@@ -111,6 +111,26 @@ fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
     p.distance(a + ab * t)
 }
 
+fn dimension_anchor_near(index: &PartIndex, ctx: &ViewContext, at: Vec3) -> Option<Anchor> {
+    if let Some(circle) = ctx
+        .projected
+        .circles
+        .iter()
+        .find(|circle| ctx.xf.point_on_leg(circle.entity.section_leg, at).distance(circle.model_centre) <= 1e-3)
+    {
+        return Some(Anchor { entity: circle.entity.clone(), attach: Attach::Centre, cached: circle.centre });
+    }
+    let mut anchor = view_anchor_near(index, ctx, at)?;
+    if let Attach::Point { at } = anchor.attach {
+        let crate::Resolution::Found(crate::Entity::Edge(id)) = index.resolve(&anchor.entity) else { return None };
+        let curve = index.edge_curve(id)?;
+        let t = crate::project::parameter_near(curve, at, None)?;
+        anchor.attach = Attach::EdgeParameter { t };
+        anchor.cached = ctx.xf.point(ctx.xf.point_on_leg(anchor.entity.section_leg, curve.point_at(t)));
+    }
+    Some(anchor)
+}
+
 fn new_annotation(
     drawing: &Drawing,
     view: ViewId,
@@ -152,7 +172,7 @@ pub fn dimension_set(
     }
     let anchors: Vec<Anchor> = points
         .iter()
-        .map(|p| view_anchor_near(index, ctx, *p))
+        .map(|p| dimension_anchor_near(index, ctx, *p))
         .collect::<Option<_>>()
         .ok_or(DrawingError::BadRequest("the part has no edges".into()))?;
     let curves: Vec<_> = anchors

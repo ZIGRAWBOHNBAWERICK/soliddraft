@@ -377,19 +377,8 @@ fn regenerate(
             re_resolve(a, &index, context, symbols, part);
         }
     }
-    let retargeted = crate::pmi_items::refresh(&mut staged, part, &index, |view| ids.contains(&view), false);
-    if !retargeted.is_empty() {
-        for sheet in 0..staged.sheets.len() {
-            let views: Vec<_> = staged.sheets[sheet]
-                .views
-                .iter()
-                .filter(|view| ids.contains(&view.id))
-                .map(|view| contexts[&view.id].clone())
-                .collect();
-            if !views.is_empty() {
-                crate::pmi_items::import_matching(&mut staged, sheet, part, &index, &views, Some(&retargeted))?;
-            }
-        }
+    if part.digest == staged.model.pinned {
+        crate::pmi_items::refresh(&mut staged, part, &index, |view| ids.contains(&view), false);
     }
     staged.refused_views.retain(|refusal| !ids.contains(&refusal.view));
     *drawing = staged;
@@ -686,7 +675,7 @@ pub fn reattach(
         && let Some(curve) = index.edge_curve(edge)
     {
         let round = crate::measure::radius_of(curve).is_some();
-        if round && !matches!(anchor.attach, Attach::Min | Attach::Max) {
+        if round && !matches!(anchor.attach, Attach::Min | Attach::Max | Attach::EdgeParameter { .. }) {
             anchor.attach = Attach::Centre;
         } else if !round && matches!(anchor.attach, Attach::Centre | Attach::Silhouette) {
             anchor.attach = Attach::Mid;

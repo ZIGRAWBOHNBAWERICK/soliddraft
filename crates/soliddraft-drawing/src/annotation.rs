@@ -267,6 +267,11 @@ pub enum Attach {
     Max,
     /// The silhouette of a curved face.
     Silhouette,
+    /// A position along the model edge.
+    EdgeParameter {
+        /// Parameter in the edge's normalized range.
+        t: f64,
+    },
     /// A point on the entity.
     Point {
         /// The point in model space.

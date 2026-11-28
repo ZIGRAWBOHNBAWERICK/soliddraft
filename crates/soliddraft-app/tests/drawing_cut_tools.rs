@@ -1322,6 +1322,29 @@ fn reopened_drawing_picks_hole_rims_in_a_fresh_kernel() {
     soliddraft_app::file::save(&mut part, &part_path).unwrap();
     let mut app = new_drawing(part);
     let top = view_named(&app, "Top view");
+    // The rim a Hole Callout anchors to, read back through the part the app has open.
+    let anchored_rim = |app: &App| {
+        let callout = session(app).selected_annotation().expect("a callout on the clicked rim");
+        let [anchor] = callout.anchors.as_slice() else { panic!("one hole anchor") };
+        let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else {
+            panic!("a durable model edge reference")
+        };
+        let doc = &app.state().state.doc;
+        let edge = doc.model().resolve_edge(reference, doc.model().body().unwrap()).unwrap();
+        let ctx = PartContext::new(doc).unwrap();
+        let drawing_part = ctx.part();
+        let index = PartIndex::build(&drawing_part).unwrap();
+        let Some(Curve3::Circle { center, radius, .. }) = index.edge_curve(edge) else { panic!("a round rim") };
+        (edge, *center, *radius)
+    };
+    let rim = Vec3::new(20.5, 23.0, 10.0);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::HoleCallout));
+    click_model(&mut app, top, rim);
+    let (first_edge, first_centre, first_radius) = anchored_rim(&app);
+    assert!((first_centre.x - 25.0).abs() < 1e-6 && (first_centre.y - 23.0).abs() < 1e-6, "{first_centre:?}");
+    assert!((first_radius - 4.5).abs() < 1e-6, "{first_radius}");
+    drawing(&mut app, DrawingAction::Undo);
+    drawing(&mut app, DrawingAction::SetTool(DrawingTool::Select));
     drawing(&mut app, DrawingAction::Save(Some(drawing_path.clone())));
     drop(app);
     drop(previous_part);
@@ -1333,7 +1356,7 @@ fn reopened_drawing_picks_hole_rims_in_a_fresh_kernel() {
         matches!(curve, Curve3::Circle { center, radius, .. }
             if center.distance(Vec3::new(25.0, 23.0, 10.0)) < 1e-6 && (radius - 4.5).abs() < 1e-6)
     };
-    let rim_edge = {
+    {
         let ctx = PartContext::new(&part).unwrap();
         let drawing_part = ctx.part();
         let index = PartIndex::build(&drawing_part).unwrap();
@@ -1347,25 +1370,21 @@ fn reopened_drawing_picks_hole_rims_in_a_fresh_kernel() {
             })
             .expect("the saved view draws the near rim of the plate hole at (25, 23)");
         assert_ne!(saved_hint, Some(edge.raw()), "the saved rim handle belongs to the original kernel");
-        edge
-    };
+    }
     let mut app = app_with_part(part);
     drawing(&mut app, DrawingAction::OpenFile(drawing_path));
     settle(&mut app);
     assert!(session(&app).doc.transforms.is_empty());
 
-    let rim = Vec3::new(20.5, 23.0, 10.0);
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::HoleCallout));
     click_model(&mut app, top, rim);
     let callout = session(&app).selected_annotation().expect("a callout on the clicked rim");
     let AnnotationKind::HoleCallout { text } = &callout.body else { panic!("a hole callout") };
     assert!(text.starts_with('4') && text.ends_with("9 THRU"), "{text}");
-    let [anchor] = callout.anchors.as_slice() else { panic!("one hole anchor") };
-    let part = &app.state().state.doc;
-    let Some(soliddraft_drawing::ModelEntity::Edge(reference)) = &anchor.entity.model else {
-        panic!("a durable model edge reference")
-    };
-    assert_eq!(part.model().resolve_edge(reference, part.model().body().unwrap()).unwrap(), rim_edge);
+    // The same rim of the clicked hole as before the save, under the fresh kernel's own handle.
+    let (edge, centre, radius) = anchored_rim(&app);
+    assert!(centre.distance(first_centre) < 1e-6 && (radius - first_radius).abs() < 1e-6, "{centre:?} {radius}");
+    assert_ne!(edge, first_edge, "the fresh kernel gave the rim another handle");
 
     drawing(&mut app, DrawingAction::SetTool(DrawingTool::HoleTable));
     click_model(&mut app, top, Vec3::new(119.5, 67.0, 10.0));

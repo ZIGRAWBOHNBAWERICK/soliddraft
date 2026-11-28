@@ -1939,6 +1939,45 @@ fn markup_targets_only_live_annotations_of_the_direct_item() {
 }
 
 #[test]
+fn imported_dimension_keeps_its_pmi_link_after_a_whitespace_edit() {
+    use soliddraft_drawing::{PmiSource, pmi_items, review};
+    use soliddraft_kernel_api::pmi::{PmiItem, PmiKind, Tolerance};
+    use soliddraft_model::pmi::PmiRow;
+
+    let kernel = BoxKernel::new();
+    let mut part = box_part(&kernel, "block", Vec3::new(120.0, 50.0, 50.0));
+    let topology = part.geometry.topology().unwrap();
+    let flats = [0.0, 120.0].map(|x| vec![topology.faces.iter().find(|face| face.centroid.x == x).unwrap().id]);
+    let item = "Plate width";
+    part.requirements.rows.push(PmiRow {
+        item: PmiItem { id: item.into(), kind: PmiKind::Width { flats: [vec![], vec![]], tolerance: Tolerance::None } },
+        on_body: Some(PmiItem { id: item.into(), kind: PmiKind::Width { flats, tolerance: Tolerance::None } }),
+        measured: vec![120.0],
+        hole: None,
+        located: vec![],
+        problem: None,
+        feature: None,
+        placements: vec![],
+        depth: None,
+        body: None,
+    });
+    let mut drawing = drawing(&part);
+    pmi_items::import_part(&mut drawing, 0, &part).unwrap();
+    let id = review::place_of_item(&drawing, item).expect("the imported width dimension").annotation;
+    let AnnotationKind::Dimension(mut dimension) = drawing.annotation(id).unwrap().body.clone() else {
+        panic!("a dimension")
+    };
+    assert_eq!(dimension.text, "<DIM>");
+    for (text, source) in [("<DIM> ", Some(PmiSource::Item { item: item.into() })), ("<DIM> MAX", None)] {
+        dimension.text = text.into();
+        apply(&mut drawing, &Command::EditDimension { annotation: id, dimension: dimension.clone() }).unwrap();
+        let edited = drawing.annotation(id).unwrap();
+        assert_eq!(edited.source, source);
+        assert_eq!(edited.body, AnnotationKind::Dimension(dimension.clone()));
+    }
+}
+
+#[test]
 fn an_inclined_section_view_shows_its_mesh_cut_and_never_blocks_an_export() {
     use soliddraft_drawing::display::Owner;
     let mut kernel = BoxKernel::new();

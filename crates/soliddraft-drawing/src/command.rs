@@ -977,7 +977,7 @@ fn edit_annotation_body(annotation: &mut Annotation, body: &AnnotationKind) {
                 || before.tolerance != after.tolerance
                 || before.chamfer_angle != after.chamfer_angle
                 || before.requirement != after.requirement
-                || text(before) != text(after)
+                || text(before).trim() != text(after).trim()
         }
         (AnnotationKind::Note { text: before, .. }, AnnotationKind::Note { text: after, .. }) => before != after,
         _ => annotation.body != *body,

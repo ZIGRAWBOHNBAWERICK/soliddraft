@@ -1499,6 +1499,9 @@ pub struct CircleInfo {
     pub model_radius: f64,
 }
 
+/// Gives each freshly projected circle the handle its saved curve carries, so a pick on
+/// saved line work finds its circle after a reopen in another kernel session. A circle
+/// that no saved curve resolves to is dropped.
 pub fn match_saved_circle_sources(index: &PartIndex<'_>, geometry: &ViewGeometry, circles: &mut Vec<CircleInfo>) {
     if circles.is_empty() {
         return;

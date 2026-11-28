@@ -109,7 +109,7 @@ impl TitleCell {
         let min_width = if field.symbol.is_some() { caption.max(17.0) } else { caption };
         let min_height = (field.size + 5.0).min(height).max(6.8);
         let symbol_fits = field.symbol.is_none()
-            || crate::display::projection_symbol_fit(self.cell).1 >= crate::display::MIN_SYMBOL_SCALE;
+            || crate::display::projection_symbol_fit(self.cell, field.cell).1 >= crate::display::MIN_SYMBOL_SCALE;
         [x, y, w, h].iter().all(|v| v.is_finite())
             && symbol_fits
             && w >= min_width.min(width) - 1e-9

@@ -813,6 +813,9 @@ fn update(o: &Options) -> Result<(), String> {
             }
             message
         };
+        // Set when a repair fails because a rebuilt view cannot serve it, not because the
+        // request names something that does not exist: the rebuild is then still saved.
+        let mut keep_rebuild = false;
         let requested = (|| -> Result<Vec<(Command, String)>, DrawingError> {
             let mut requested = Vec::new();
             let annotation = |id| drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id));
@@ -834,7 +837,8 @@ fn update(o: &Options) -> Result<(), String> {
                     return Err(DrawingError::BadRequest(format!("The point for end {end} of {id} must be finite")));
                 }
                 let index = PartIndex::build(part)?;
-                let ctx = derived::context(&drawing, part, &index, annotation(id)?.view)?;
+                let ctx = derived::context(&drawing, part, &index, annotation(id)?.view)
+                    .inspect_err(|_| keep_rebuild = true)?;
                 let entity = soliddraft_drawing::annotate::view_anchor_near(&index, &ctx, *at)
                     .ok_or_else(|| DrawingError::BadRequest("No edge in the view is available at that point".into()))?
                     .entity;
@@ -862,8 +866,16 @@ fn update(o: &Options) -> Result<(), String> {
                 ));
             }
             Ok(requested)
-        })()
-        .map_err(|error| repair_error(error.to_string()))?;
+        })();
+        let requested = match requested {
+            Ok(requested) => requested,
+            Err(error) => {
+                if keep_rebuild {
+                    file::write(&saved, &drawing, &meta).map_err(|e| e.to_string())?;
+                }
+                return Err(repair_error(error.to_string()));
+            }
+        };
         let prepared = if requested.is_empty() {
             None
         } else {

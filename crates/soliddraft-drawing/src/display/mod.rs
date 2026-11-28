@@ -687,7 +687,7 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
             owner: Owner::Sheet,
         }));
         if field.symbol.as_deref() == Some("projection") {
-            let (centre, scale) = projection_symbol_fit([cell.0, cell.1, cell.2, cell.3]);
+            let (centre, scale) = projection_symbol_fit([cell.0, cell.1, cell.2, cell.3], field.cell);
             projection_symbol(sheet.projection, centre, scale, lines.thin, items);
             continue;
         }
@@ -721,16 +721,22 @@ fn format_items(drawing: &Drawing, sheet: &Sheet, ctx: &Context<'_>, items: &mut
 const SYMBOL_SIZE: (f64, f64) = (17.0, 6.75);
 /// Space the caption takes at the top of a title cell, with a gap below it.
 const CAPTION_DEPTH: f64 = 3.2;
+/// Height of the full-size symbol's centre above the bottom of a template's cell.
+const TEMPLATE_SYMBOL_RISE: f64 = 3.2;
 /// Clearance between the projection symbol and its cell's edges.
 const SYMBOL_MARGIN: f64 = 0.3;
 /// The smallest fraction of full size the projection symbol may be drawn at.
 pub(crate) const MIN_SYMBOL_SCALE: f64 = 0.65;
 
 /// Where the projection symbol sits in a title cell `[x, y, width, height]` and its
-/// size as a fraction of full size: centred below the caption, never larger than full
-/// size, and inside the cell.
-pub(crate) fn projection_symbol_fit(cell: [f64; 4]) -> (Point2, f64) {
+/// size as a fraction of full size. A cell as large as the template's cell `template`
+/// keeps the full-size symbol where the template lays it out. A smaller cell gets the
+/// symbol centred below the caption, never larger than full size, and inside the cell.
+pub(crate) fn projection_symbol_fit(cell: [f64; 4], template: [f64; 4]) -> (Point2, f64) {
     let [x, y, w, h] = cell;
+    if w >= template[2] - 1e-9 && h >= template[3] - 1e-9 {
+        return (Point2::new(x + w / 2.0, y + TEMPLATE_SYMBOL_RISE), 1.0);
+    }
     let (bottom, top) = (y + SYMBOL_MARGIN, y + h - CAPTION_DEPTH - SYMBOL_MARGIN);
     let scale = ((top - bottom) / SYMBOL_SIZE.1).min((w - 2.0 * SYMBOL_MARGIN) / SYMBOL_SIZE.0).min(1.0);
     (Point2::new(x + w / 2.0, (bottom + top) / 2.0), scale)

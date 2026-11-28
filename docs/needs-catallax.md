@@ -6,7 +6,7 @@ Face-relative tools can be copied by feature patterns and used in planar first-h
 
 Catallax `801cb656751d463237c116437c78a03cd873e434` adds certified STEP import for rectangular trims on equal-weight bilinear surfaces. SolidDraft's lattice and gyroid editors offer Constant, Linear along an axis, Distance from faces (whole skin or selected faces), Radial from an axis, and From a point. Catallax also supports oblique linear grades in its field recipes. SolidDraft still needs an input for the line through the oblique grade's anchors. Catallax `e3ef8f8fce7c20acf1d6dd5a2d19dbd9d7640b45` added file-aware lattice and gyroid stages and the shared periodic spline display mesher. Catallax `6e4b5f89e1396d314e991b24fd777bac037526dd` adds a finish's graphical callout and the AP242 validation properties ([Catallax changes](https://github.com/BohnBawerick/catallax/pull/764)). Catallax `ccae79ab5b39f5b2adbbd0d6827a4f9b3ed0bfc3` added extrusions that start on a trimmed face, planar or curved, and limits on curved faces, in recipe format 6 ([Catallax changes](https://github.com/BohnBawerick/catallax/pull/756)). SolidDraft still uses constant thickness for shells. The spherical scan fitter has no SolidDraft command. [Catallax changes](https://github.com/BohnBawerick/catallax/pull/750).
 
-The current pin is Catallax main `cc5f5786a117675cbb248e007f9f809298e8d4a9`. It adds the GPU preview mesher, the float display description and the spline evaluators and evaluates cone, sphere and torus faces directly in the preview mesher.
+The current pin is Catallax main `f2fc158c3fea46ccecce10376480caee62ab42e7`. It adds the GPU evaluators for cone, sphere and torus faces, which join the spline evaluators in the GPU preview mesher, closed-form projection for analytic surfaces in STEP import, exact drawing sections at inclined angles, and `plan_face_levels`, which gives each face's point count at each display level before a mesh is emitted.
 
 Each solid retains its `IncrementalApplicationBody` and owned `EvaluationCheckpoint`.
 For a new solid, the adapter merges operand and read-only context recipes, selects the
@@ -70,7 +70,7 @@ A full symmetric union of equal crossing cylinders can stop at an ambiguous appl
 
 ## Numerical STEP reopening
 
-The owner pocket-rim R2 fillet's STEP reopens as a tolerant body with all 19 faces and the bounding box within 0.000001 mm. SolidDraft shows the approximate display and refuses to estimate mass until the display closes. Closing that display is a follow-on. [Fillet acceptance](../crates/soliddraft-app/tests/fillet_acceptance.rs).
+The owner pocket-rim R2 fillet's STEP reopens as a tolerant body with all 19 faces and the bounding box within 0.000001 mm. Catallax's display of it folds one sliver of a torus face, three samples of the edge that face shares with a plane, back over the plane. SolidDraft leaves out such a sliver when it is no wider than the display tolerance and every side of it is used more often in one direction than the other; the display then closes and the reopened volume agrees with the built part's. The fold itself remains Catallax's to fix. [Fillet acceptance](../crates/soliddraft-app/tests/fillet_acceptance.rs).
 
 ## Two-body intersection and distance
 

@@ -40,6 +40,7 @@ mod body_relation;
 pub use body_relation::{BodyContactFaces, BodyDistance, BodyQueryRefusal, BodyRelation, OverlapVolume, PlacedBody};
 mod checks;
 mod edit;
+mod face_levels;
 mod field;
 mod geometry;
 mod gpu_preview;
@@ -54,6 +55,7 @@ mod sweep;
 
 pub use checks::{IndependentCheck, IndependentStep, PrintMesh, PrintReport};
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
+pub use face_levels::{FaceLevel, FaceLevelPoints};
 pub use field::{
     DistanceGrade, ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, GradeFaces, GradeKind,
     GradedField, LinearGrade, PointGrade, ProxyMoments, RadialGrade, StandInExport, StandInReport,
@@ -1423,6 +1425,38 @@ pub trait Kernel: Send + Sync {
     /// returns [`tessellate_edges`](Self::tessellate_edges).
     fn checked_rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         self.tessellate_edges(body, params)
+    }
+
+    /// How many points each face of `body` has at each of its three nested display
+    /// levels at `params`, in topology order, before any mesh is made. A caller with a
+    /// display budget reads them to see what a choice of levels costs. `None` when the
+    /// backend plans no nested levels for this body; the screen then keeps whole-body
+    /// levels. The default has none.
+    fn face_level_points(
+        &self,
+        _body: BodyId,
+        _params: &TessellationParams,
+    ) -> KernelResult<Option<Vec<FaceLevelPoints>>> {
+        Ok(None)
+    }
+
+    /// Plans the nested levels of `body` at `params` once, hands the counts
+    /// [`face_level_points`](Self::face_level_points) gives to `choose`, and returns the
+    /// display mesh with each face at the level `choose` answered for it, in the order
+    /// of the counts. The plan is made before `choose` runs and no vertex or index
+    /// buffer is, so a budget decides on exact counts before it spends memory, and
+    /// `choose` may answer `None` to have no mesh made at all. Each face of the mesh has
+    /// exactly the points counted for its level. With every face at [`FaceLevel::Fine`]
+    /// the mesh is the one [`tessellate`](Self::tessellate) gives; any other choice is a
+    /// screen mesh like [`preview`](Self::preview), never exported. `None` when `choose`
+    /// declined, and, without calling `choose`, where `face_level_points` is `None`.
+    fn face_level_mesh(
+        &self,
+        _body: BodyId,
+        _params: &TessellationParams,
+        _choose: &mut dyn FnMut(&[FaceLevelPoints]) -> Option<Vec<FaceLevel>>,
+    ) -> KernelResult<Option<Mesh>> {
+        Ok(None)
     }
 
     /// Where the ray from `origin` along `direction` first meets `face` of `body`, for a

@@ -436,10 +436,12 @@ impl Approximate {
                 "A surface body encloses no volume, so it has no mass properties.".into(),
             ));
         }
-        let sample = self.sample(&catallax_mesh::MeshOptions::default())?;
+        let options = catallax_mesh::MeshOptions::default();
+        let sample = self.sample(&options)?;
         let positions: Vec<Vec3> = sample.positions.iter().copied().map(Vec3::from).collect();
         let triangles: Vec<[usize; 3]> = sample.triangles.iter().map(|t| t.vertices).collect();
-        mass_of_closed(&positions, &triangles).map_err(|why| KernelError::Unsupported(why.into()))
+        mass_of_closed(&positions, &triangles, options.chord_tolerance.to_f64_nearest())
+            .map_err(|why| KernelError::Unsupported(why.into()))
     }
 
     /// Mass properties already estimated, without starting.
@@ -748,12 +750,24 @@ fn area_centroid(triangles: &[[Vec3; 3]]) -> (f64, Vec3) {
     (area, if area > 0.0 { moment * (1.0 / area) } else { Vec3::ZERO })
 }
 
+/// The least height of a triangle: twice its area over its longest side.
+fn width([a, b, c]: [Vec3; 3]) -> f64 {
+    let longest = [a.distance(b), b.distance(c), c.distance(a)].into_iter().fold(0.0, f64::max);
+    if longest > 0.0 { (b - a).cross(c - a).length() / longest } else { 0.0 }
+}
+
 /// Mass properties at unit density of the solid a closed triangle mesh encloses, by the
 /// divergence theorem over signed tetrahedra from the centre of the mesh's box, so a part
 /// far from the origin keeps its digits. Points at the same position are one vertex. The
 /// mesh must be closed and consistently wound: every edge used once in each direction.
+/// A sliver no wider than `fold_tolerance` whose every side is used more often forward
+/// than back is a fold of the display over its neighbour, and is left out first.
 /// A mesh wound inward gives the same answer. The reason in words when it cannot answer.
-fn mass_of_closed(positions: &[Vec3], triangles: &[[usize; 3]]) -> Result<MassProperties, &'static str> {
+fn mass_of_closed(
+    positions: &[Vec3],
+    triangles: &[[usize; 3]],
+    fold_tolerance: f64,
+) -> Result<MassProperties, &'static str> {
     const OPEN: &str = "The approximate display of this body is not closed, so its mass is not estimated.";
     // Weld points at the same position, as faces sample their shared edges alike.
     let mut welded: BTreeMap<[u64; 3], usize> = BTreeMap::new();
@@ -764,18 +778,31 @@ fn mass_of_closed(positions: &[Vec3], triangles: &[[usize; 3]]) -> Result<MassPr
             *welded.entry([p.x, p.y, p.z].map(|v| (v + 0.0).to_bits())).or_insert(next)
         })
         .collect();
-    let mut directed: BTreeMap<(usize, usize), usize> = BTreeMap::new();
-    let mut used = Vec::new();
-    for triangle in triangles {
+    let sides = |triangle: &[usize; 3]| {
         let [a, b, c] = triangle.map(|v| ids[v]);
-        if a == b || b == c || c == a {
-            continue;
-        }
-        for edge in [(a, b), (b, c), (c, a)] {
-            *directed.entry(edge).or_default() += 1;
-        }
-        used.push(*triangle);
+        [(a, b), (b, c), (c, a)]
+    };
+    let mut used: Vec<[usize; 3]> =
+        triangles.iter().copied().filter(|t| sides(t).iter().all(|(a, b)| a != b)).collect();
+    let mut directed: BTreeMap<(usize, usize), usize> = BTreeMap::new();
+    for side in used.iter().flat_map(sides) {
+        *directed.entry(side).or_default() += 1;
     }
+    // A face's display can fold a sliver over the boundary it shares with its neighbour,
+    // within the display tolerance: three boundary samples taken as one more triangle.
+    // Each of its sides is then used more often forward than back.
+    used.retain(|triangle| {
+        let count = |directed: &BTreeMap<(usize, usize), usize>, side| directed.get(&side).copied().unwrap_or(0);
+        let fold = sides(triangle).iter().all(|&(a, b)| count(&directed, (a, b)) > count(&directed, (b, a)))
+            && width(triangle.map(|v| positions[v])) <= fold_tolerance;
+        if fold {
+            for side in sides(triangle) {
+                *directed.entry(side).or_default() -= 1;
+            }
+        }
+        !fold
+    });
+    directed.retain(|_, n| *n > 0);
     if used.is_empty() || directed.iter().any(|(&(a, b), &n)| n != 1 || directed.get(&(b, a)) != Some(&1)) {
         return Err(OPEN);
     }
@@ -879,10 +906,10 @@ mod tests {
     #[test]
     fn a_closed_cube_has_its_volume_centroid_and_inertia() {
         let (positions, triangles) = cube(Vec3::ZERO, 2.0);
-        let mass = mass_of_closed(&positions, &triangles).unwrap();
+        let mass = mass_of_closed(&positions, &triangles, 0.0).unwrap();
         assert_cube(&mass, Vec3::ZERO, 2.0);
         let inward: Vec<_> = triangles.iter().map(|[a, b, c]| [*a, *c, *b]).collect();
-        assert_eq!(mass_of_closed(&positions, &inward).unwrap().volume, mass.volume);
+        assert_eq!(mass_of_closed(&positions, &inward, 0.0).unwrap().volume, mass.volume);
     }
 
     /// Integrated about the world origin, a unit cube 1e6 mm away had a centroidal inertia
@@ -892,18 +919,92 @@ mod tests {
         for offset in [1e6, 1e9] {
             let corner = Vec3::new(offset, -offset, offset);
             let (positions, triangles) = cube(corner, 1.0);
-            assert_cube(&mass_of_closed(&positions, &triangles).unwrap(), corner, 1.0);
+            assert_cube(&mass_of_closed(&positions, &triangles, 0.0).unwrap(), corner, 1.0);
         }
     }
 
+    /// Refused with the fold repair off and with it free to leave out any over-used
+    /// triangle: the flipped triangle is over-used on every side and left out, which opens
+    /// the cube rather than closing it.
     #[test]
     fn an_open_or_inconsistently_wound_mesh_has_no_mass_estimate() {
-        let (positions, mut triangles) = cube(Vec3::ZERO, 1.0);
-        let open = &triangles[1..];
-        assert!(mass_of_closed(&positions, open).unwrap_err().contains("not closed"));
-        triangles[0] = [triangles[0][0], triangles[0][2], triangles[0][1]];
-        assert!(mass_of_closed(&positions, &triangles).unwrap_err().contains("not closed"));
-        assert!(mass_of_closed(&positions, &[]).is_err());
+        for fold_tolerance in [0.0, 10.0] {
+            let (positions, mut triangles) = cube(Vec3::ZERO, 1.0);
+            let open = &triangles[1..];
+            assert!(mass_of_closed(&positions, open, fold_tolerance).unwrap_err().contains("not closed"));
+            triangles[0] = [triangles[0][0], triangles[0][2], triangles[0][1]];
+            assert!(mass_of_closed(&positions, &triangles, fold_tolerance).unwrap_err().contains("not closed"));
+            assert!(mass_of_closed(&positions, &[], fold_tolerance).is_err());
+        }
+    }
+
+    /// The front and top faces of a unit cube share an edge sampled at its middle, 4 nm off
+    /// the line, as a curved edge is: the closed mesh's points and triangles, and the
+    /// sliver of the first face's fan that folds over the second.
+    fn cube_with_a_sampled_edge() -> (Vec<Vec3>, Vec<[usize; 3]>, [usize; 3]) {
+        let (mut positions, quads) = cube(Vec3::ZERO, 1.0);
+        let (a, b) = (Vec3::new(0., 0., 1.), Vec3::new(1., 0., 1.));
+        let middle = positions.len();
+        positions.push(Vec3::new(0.5, -4e-6, 1.0));
+        let mut triangles = Vec::new();
+        let mut fold = None;
+        for face in quads.chunks(2) {
+            let q = [face[0][0], face[0][1], face[0][2], face[1][2]];
+            let side = (0..4).find(|&i| {
+                let ends = [positions[q[i]], positions[q[(i + 1) % 4]]];
+                ends == [a, b] || ends == [b, a]
+            });
+            match side {
+                // A fan from the middle sample keeps the face's winding.
+                Some(i) => {
+                    let [p0, p1, p2, p3] = std::array::from_fn(|k| q[(i + k) % 4]);
+                    triangles.extend([[middle, p1, p2], [middle, p2, p3], [middle, p3, p0]]);
+                    fold.get_or_insert([p0, middle, p1]);
+                }
+                None => triangles.extend_from_slice(face),
+            }
+        }
+        (positions, triangles, fold.unwrap())
+    }
+
+    /// The reopened R2 rim's display folded one sliver of its torus face, three samples of
+    /// the edge it shares with a plane, over that plane.
+    #[test]
+    fn a_sliver_folded_over_a_shared_boundary_is_left_out() {
+        let (positions, mut triangles, fold) = cube_with_a_sampled_edge();
+        let closed = mass_of_closed(&positions, &triangles, 0.0).unwrap();
+        assert!((closed.volume - 1.0).abs() < 1e-5, "{closed:?}");
+        triangles.push(fold);
+        assert!(mass_of_closed(&positions, &triangles, 0.0).unwrap_err().contains("not closed"));
+        assert!(mass_of_closed(&positions, &triangles, 1e-6).unwrap_err().contains("not closed"));
+        assert_eq!(mass_of_closed(&positions, &triangles, 1e-5).unwrap(), closed);
+    }
+
+    /// Where the fold sits in the triangle list, and which face it folds over, does not
+    /// change what is left out.
+    #[test]
+    fn a_fold_first_in_the_list_or_over_the_other_face_is_left_out() {
+        let (positions, triangles, fold) = cube_with_a_sampled_edge();
+        let closed = mass_of_closed(&positions, &triangles, 0.0).unwrap();
+        let first: Vec<_> = std::iter::once(fold).chain(triangles.iter().copied()).collect();
+        assert!(mass_of_closed(&positions, &first, 0.0).unwrap_err().contains("not closed"));
+        assert_eq!(mass_of_closed(&positions, &first, 1e-5).unwrap(), closed);
+        let [p0, middle, p1] = fold;
+        let over_the_other: Vec<_> = triangles.iter().copied().chain([[p1, middle, p0]]).collect();
+        assert!(mass_of_closed(&positions, &over_the_other, 0.0).unwrap_err().contains("not closed"));
+        assert_eq!(mass_of_closed(&positions, &over_the_other, 1e-5).unwrap(), closed);
+    }
+
+    /// Leaving out a fold does not excuse a hole elsewhere in the display.
+    #[test]
+    fn a_folded_mesh_with_a_hole_has_no_mass_estimate() {
+        let (positions, mut triangles, fold) = cube_with_a_sampled_edge();
+        triangles.push(fold);
+        // The first triangle is on the bottom face, away from the sampled top edge.
+        let holed = &triangles[1..];
+        for fold_tolerance in [1e-5, 10.0] {
+            assert!(mass_of_closed(&positions, holed, fold_tolerance).unwrap_err().contains("not closed"));
+        }
     }
 
     /// A 10 x 8 x 6 mm block's numerical definition, the index of its top face and its

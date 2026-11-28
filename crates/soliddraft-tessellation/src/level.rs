@@ -1,6 +1,8 @@
-//! The three quantised levels every definition is tessellated at.
+//! The three quantised levels every definition is tessellated at, and the three nested
+//! levels each face of a single part has.
 
 use serde::{Deserialize, Serialize};
+use soliddraft_kernel_api::FaceLevel;
 
 /// One of a definition's three meshes. Each level's chord height is a fixed multiple of
 /// the standard one, so the levels of every definition line up and an occurrence's
@@ -35,6 +37,18 @@ impl Level {
         }
     }
 
+    /// The chord height of this level of one face as a multiple of the chord height its
+    /// part was planned at. A part's faces are planned once and the kernel nests two
+    /// coarser levels of every face inside that plan: they keep the plan's edge points,
+    /// so neighbouring faces at different levels still meet.
+    pub fn face_chord_factor(self) -> f64 {
+        match self {
+            Level::Coarse => 10.0,
+            Level::Standard => 2.0,
+            Level::Fine => 1.0,
+        }
+    }
+
     /// The next finer level.
     pub fn finer(self) -> Option<Level> {
         match self {
@@ -59,6 +73,26 @@ impl Level {
             Level::Coarse => "coarse",
             Level::Standard => "standard",
             Level::Fine => "fine",
+        }
+    }
+}
+
+impl From<Level> for FaceLevel {
+    fn from(level: Level) -> FaceLevel {
+        match level {
+            Level::Coarse => FaceLevel::Coarse,
+            Level::Standard => FaceLevel::Standard,
+            Level::Fine => FaceLevel::Fine,
+        }
+    }
+}
+
+impl From<FaceLevel> for Level {
+    fn from(level: FaceLevel) -> Level {
+        match level {
+            FaceLevel::Coarse => Level::Coarse,
+            FaceLevel::Standard => Level::Standard,
+            FaceLevel::Fine => Level::Fine,
         }
     }
 }
@@ -98,5 +132,15 @@ mod tests {
             assert_eq!(Level::ALL[l.index()], l);
         }
         assert!("medium".parse::<Level>().is_err());
+    }
+
+    #[test]
+    fn face_levels_nest_under_the_planned_chord() {
+        for (level, face) in Level::ALL.into_iter().zip(FaceLevel::ALL) {
+            assert_eq!(FaceLevel::from(level), face);
+            assert_eq!(Level::from(face), level);
+            assert_eq!(level.index(), face.index());
+        }
+        assert_eq!(Level::ALL.map(Level::face_chord_factor), [10.0, 2.0, 1.0]);
     }
 }

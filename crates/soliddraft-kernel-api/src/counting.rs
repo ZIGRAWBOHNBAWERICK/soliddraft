@@ -532,6 +532,27 @@ impl Kernel for Counting {
         self.inner.gpu_preview(body, params)
     }
 
+    fn face_level_points(
+        &self,
+        body: BodyId,
+        params: &TessellationParams,
+    ) -> KernelResult<Option<Vec<crate::FaceLevelPoints>>> {
+        self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
+        self.inner.face_level_points(body, params)
+    }
+
+    fn face_level_mesh(
+        &self,
+        body: BodyId,
+        params: &TessellationParams,
+        choose: &mut dyn FnMut(&[crate::FaceLevelPoints]) -> Option<Vec<crate::FaceLevel>>,
+    ) -> KernelResult<Option<Mesh>> {
+        self.note(Work::Mesh(body));
+        self.route(body, MeshRoute::Display);
+        self.inner.face_level_mesh(body, params, choose)
+    }
+
     fn face_ray_point(&self, body: BodyId, face: FaceId, origin: Vec3, direction: Vec3) -> KernelResult<Option<Vec3>> {
         self.inner.face_ray_point(body, face, origin, direction)
     }

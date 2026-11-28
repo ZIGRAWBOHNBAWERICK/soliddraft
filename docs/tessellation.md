@@ -68,6 +68,42 @@ needs them.
 The assembly viewport makes the same choice on the GPU, for every placement at once, in
 its cull pass; see "Rendering and picking" in [assemblies.md](assemblies.md).
 
+## Choosing a level per face
+
+A single part can choose per face. `Levels::faces()` gives its `FaceLevels`: the kernel
+plans the part once, at the parameters of the fine level, and nests three levels of
+every face in that plan.
+
+| Face level | Chord height | Mesh |
+|---|---|---|
+| Fine | the plan's chord height | the part's mesh at the planned level |
+| Standard | 2 times that | fewer points inside the face |
+| Coarse | 10 times that | fewer still |
+
+Every level of every face keeps the plan's edge points. Two neighbouring faces at
+different levels therefore meet on the same points, and a finer level of a face keeps
+the points of its coarser ones.
+
+The kernel only nests levels where it refines a face in rounds. With the pinned
+Catallax that is spline faces, such as the wall of a loft between circles off one axis.
+A plane, cylinder, cone, sphere or torus is meshed in one pass and is the same mesh at
+all three levels, so a part of such faces changes its points only with the level it is
+planned at (`Levels::faces_at`).
+
+- `View` is the camera of a frame and the space it shows: a `Projection` and the clip
+  planes of the viewport. `View::perspective` and `View::orthographic` build one.
+- A face is in view while its bounding box, as the body's topology gives it, has a
+  corner inside every clip plane (`View::shows_box`).
+- `Thresholds::initial_faces` and `Thresholds::update_faces` keep one `Choice` per
+  face and move each by the rule above, at the scale of the sphere around the face's
+  box.
+- A face with no part in view is never promoted. It counts as quiet and steps down
+  after the wait.
+
+So zooming in on one end of a part moves the faces on screen to finer levels and leaves
+the rest where they were. The viewport does not draw per-face levels yet; it still
+shows one level for the whole part.
+
 ## The device budget
 
 The app owns `DeviceBudget`, not the document. Desktop and browser use one quarter of
@@ -77,6 +113,38 @@ Below 80 percent of both limits the ceiling is fine; below both limits it is sta
 at or above either limit it is coarse. The budget changes only which level
 is drawn, not its parameters or mesh bytes. The render tier also checks the enabled
 compute limit and keeps OpenGL on the basic path.
+
+### Budgeting a part before it is meshed
+
+For per-face levels the budget acts before any mesh exists. `Kernel::face_level_points`
+gives the points each face has at each level, counted from the plan with no vertex or
+index buffer built. `Usage::of_points` turns a count into the most display data it can
+take: 24 bytes of position and normal per point and at most two triangles per point,
+64 bytes in all.
+
+`DeviceBudget::grant` takes each face's counts, the level the camera asks for and the
+pixels a millimetre covers there, and returns the levels that fit in what is left of
+the budget:
+
+- Every face gets what it asks for when the counted total fits.
+- Otherwise faces step down, the step that costs the least error on screen per point
+  saved first. Faces out of view go first.
+- A face never steps to a level that saves it no points, as with a planar face.
+- When even the coarsest levels do not fit, the grant says so.
+
+`DeviceBudget::mesh_faces` does it in one kernel call: the kernel plans the part,
+`grant` settles the levels on the counts, and the kernel emits the mesh from the same
+plan. The mesh has exactly the counted points. When the grant does not fit, the kernel
+is told so before it builds anything and no mesh is made.
+
+`DeviceBudget::mesh_part` then tries the part's next coarser level: it plans at fine,
+standard and coarse in turn and meshes the first plan that fits. A part over the budget
+even at its coarse level is meshed there, so it can still be drawn, and says it is over.
+A plan that is counted and turned down costs the kernel its planning work and no
+display memory.
+
+A larger adapter is granted finer levels and a smaller one coarser; the bytes of a face
+at a level are the same on both.
 
 ## The display cache
 

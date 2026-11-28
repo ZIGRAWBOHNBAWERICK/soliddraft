@@ -13,6 +13,13 @@ paths = ["crates/soliddraft-kernel-catallax/src/distance.rs", "crates/soliddraft
 module = ["distance"]
 
 [[areas]]
+name = "kernel_catallax.face_levels"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/face_levels.rs"]
+module = ["face_levels"]
+
+[[areas]]
 name = "kernel_catallax.feature_pattern"
 owner = "core"
 crate = "soliddraft-kernel-catallax"

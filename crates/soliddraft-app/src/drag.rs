@@ -888,7 +888,7 @@ impl Worker {
                         }
                     }
                 })
-                .map_err(|error| format!("cannot start edit proof: {error}"))?;
+                .map_err(|error| format!("cannot start the edit worker: {error}"))?;
             let current = newest.clone();
             let retained = protected.clone();
             std::thread::Builder::new()
@@ -1015,7 +1015,7 @@ impl Worker {
     pub(crate) fn enqueue(&mut self, request: u64, job: Job) -> Result<(), String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.jobs.send(Queued { request, job }).map_err(|_| "the edit proof worker stopped".into())
+            self.jobs.send(Queued { request, job }).map_err(|_| "the edit worker stopped".into())
         }
         // The browser builds in its kernel worker; the page proves from the builds it hands
         // over, without evaluating geometry on the interface thread.

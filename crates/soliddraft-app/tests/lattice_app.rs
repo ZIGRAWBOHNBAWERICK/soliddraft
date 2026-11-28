@@ -114,7 +114,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_lattice() {
     assert_eq!(l.cell_size_mm, Some(5.0));
     assert_eq!(l.radius_mm, Some(1.0.into()));
     assert_eq!(last.status, soliddraft_app::document::FeatureStatus::Ok);
-    assert!(!last.summary().contains("unproved"), "nothing about checking shows to the user");
+    assert!(last.summary().starts_with('±') && !last.summary().contains("unproved"), "{}", last.summary());
     let image = std::path::PathBuf::from(
         std::env::var_os("LATTICE_UI_EVIDENCE").unwrap_or_else(|| temporary.join("lattice.png").into_os_string()),
     );
@@ -177,7 +177,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     let FeatureKind::Gyroid(g) = &last.kind else { panic!("last feature is gyroid") };
     assert_eq!((g.period_mm, g.level.clone()), (10.0, soliddraft_kernel_api::Grade::Constant(0.0)));
     assert_eq!(last.status, soliddraft_app::document::FeatureStatus::Ok);
-    assert!(!last.summary().contains("unproved"), "nothing about checking shows to the user");
+    assert!(last.summary().starts_with('±') && !last.summary().contains("unproved"), "{}", last.summary());
 
     button(&mut app, "Gyroid1");
     button(&mut app, "Edit feature");
@@ -189,7 +189,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     let FeatureKind::Gyroid(g) = &last.kind else { panic!("last feature is gyroid") };
     assert_eq!((g.period_mm, g.level.clone()), (10.0, soliddraft_kernel_api::Grade::Constant(0.5)));
     assert_eq!(last.status, soliddraft_app::document::FeatureStatus::Ok);
-    assert!(app.query_by_label("unproved preview").is_none(), "nothing about checking shows to the user");
+    assert!(app.query_by_label("unproved preview").is_none(), "the viewport carries no preview label");
     let image = std::path::PathBuf::from(
         std::env::var_os("GYROID_UI_EVIDENCE").unwrap_or_else(|| temporary.join("gyroid.png").into_os_string()),
     );

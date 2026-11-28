@@ -131,9 +131,9 @@ impl Report {
     /// One line for a status bar or a terminal.
     pub fn summary(&self) -> String {
         match self {
-            Report::Step(StepReport { tolerant: true, faces, edges, .. }) => format!(
-                "{faces} faces, {edges} edges; tolerant import; the file's distance from the part is not certified"
-            ),
+            Report::Step(StepReport { tolerant: true, faces, edges, .. }) => {
+                format!("{faces} faces, {edges} edges; tolerant import; the file's distance from the part is unknown")
+            }
             Report::Step(StepReport { approximate: Some(approximate), faces, edges, .. }) => format!(
                 "{faces} faces, {edges} edges; approximate part built within {} mm; lengths written to within {} mm; \
                  the file's distance from the part is not established",
@@ -143,39 +143,35 @@ impl Report {
             Report::Step(r) => {
                 // A fitted surface's distance from its exact definition adds to the file's own.
                 let bound = if r.fit_mm > 0.0 { (r.max_deviation_mm + r.fit_mm).next_up() } else { r.max_deviation_mm };
-                let mut s = format!(
-                    "{} faces, {} edges; within {} mm of the exact part (proven)",
-                    r.faces,
-                    r.edges,
-                    bound_mm(bound)
-                );
+                let mut s =
+                    format!("{} faces, {} edges; within {} mm of the exact part", r.faces, r.edges, bound_mm(bound));
                 if !r.within_tolerance {
                     s += "; over the requested tolerance";
                 }
                 s
             }
             Report::Iges(r) => format!(
-                "{} faces, {} edges; within {} mm of the exact part (proven)",
+                "{} faces, {} edges; within {} mm of the exact part",
                 r.faces,
                 r.edges,
                 bound_mm(r.max_deviation_mm)
             ),
             Report::FieldMesh(r) => {
                 format!(
-                    "{} triangles; approximate field mesh, proven within {} mm",
+                    "{} triangles; approximate field mesh, within {} mm",
                     r.triangles,
                     bound_mm(r.deviation_bound_mm)
                 )
             }
             Report::StandIn(r) => format!(
-                "{} unit-density proxy solids and the massless source envelope; {}, within the field's proven moments",
+                "{} unit-density proxy solids and the massless source envelope; {}, within the field's moments",
                 r.mass_bodies, r.label
             ),
             Report::Mesh(r) => {
                 let mut s = format!("{} triangles; within {} mm of the exact part", r.triangles, r.chord_height);
                 if let Some(check) = &r.print_check {
                     s = format!(
-                        "{} triangles; certified within {} mm; {} print route",
+                        "{} triangles; within {} mm; {} print route",
                         r.triangles,
                         bound_mm(check.certified_accuracy_mm),
                         check.route
@@ -461,12 +457,12 @@ mod tests {
         // The tray of the real-use pass printed every digit of its binary64 bound.
         assert_eq!(
             step(1.3844827940065006e-16, 0.0).summary(),
-            "7 faces, 15 edges; within 0.000001 mm of the exact part (proven)"
+            "7 faces, 15 edges; within 0.000001 mm of the exact part"
         );
         // The ring fillet's fitted band: 0.0000188... rounds up, not to the nearest.
         assert_eq!(
             step(0.0, 0.000018850358009776183).summary(),
-            "7 faces, 15 edges; within 0.000019 mm of the exact part (proven)"
+            "7 faces, 15 edges; within 0.000019 mm of the exact part"
         );
         assert!(step(0.0, 0.0).summary().contains("within 0 mm"));
         // The binary64 nearest 0.01 is a little above it, so it reads as the next step.

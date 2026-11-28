@@ -645,10 +645,10 @@ impl AssemblyDocument {
             (code, format!("{name}: {e}"))
         })?;
         if mesh.unproved {
-            return Err((CheckCode::UnsupportedBody, format!("{name}: the kernel gave an unproved mesh")));
+            return Err((CheckCode::UnsupportedBody, format!("{name}: no exact mesh is available for this part")));
         }
         if let Some(c) = mesh.unavailable_controls.iter().find(|c| c.contains("chord")) {
-            return Err((CheckCode::UnsupportedBody, format!("{name}: the chord bound is not certified ({c})")));
+            return Err((CheckCode::UnsupportedBody, format!("{name}: the mesh chord bound is unavailable ({c})")));
         }
         let mut faces: Vec<(FaceId, String)> = Vec::new();
         let mut face_names = Vec::new();
@@ -756,7 +756,7 @@ impl AssemblyDocument {
             let c = &result.contact[0];
             result.why = format!(
                 "Exactly touching: mate {} holds {} and {} on one plane, opposed, and the faces share the point {}. \
-                 No overlap was proven; proving there is none needs the exact tier.",
+                 Overlap is not ruled out; ruling it out needs the exact tier.",
                 c.mate,
                 c.a,
                 c.b,
@@ -845,14 +845,14 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         let lo = certified::sub_down(gap, margin);
         result.outcome = Outcome::Clear;
         result.distance = DistanceBounds { lo, hi: None };
-        result.why = format!("The parts are at least {} apart: their certified meshes' boxes are.", mm(lo));
+        result.why = format!("The parts are at least {} apart: their meshes' boxes are.", mm(lo));
         result.clearance = clearance.map(|_| ClearanceOutcome::Met);
         return (result, Vec::new());
     }
     let near = geometry::near(a, b, cutoff);
     let faces = near.pairs.iter().map(|(ta, tb, _)| (*ta, *tb)).collect();
     let Some(d) = near.upper else {
-        result.why = "A part's certified mesh is empty.".into();
+        result.why = "A part's mesh is empty.".into();
         result.clearance = clearance.map(|_| ClearanceOutcome::Undecided);
         return (result, faces);
     };
@@ -866,7 +866,7 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
         result.witness = Some(y.to_array());
         result.why = format!(
-            "The point {} is inside both parts: inside both certified meshes and farther from each than its bound.",
+            "The point {} is inside both parts: inside both meshes and farther from each than its bound.",
             point_text(y.to_array())
         );
     } else if lower > margin {
@@ -883,7 +883,7 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
             result.outcome = Outcome::Clear;
             result.distance = DistanceBounds { lo, hi: Some(hi) };
             result.why = format!(
-                "The parts are {} to {} apart: their certified meshes are {} apart, and each mesh is within {} of its part.",
+                "The parts are {} to {} apart: their meshes are {} apart, and each mesh is within {} of its part.",
                 mm(lo),
                 mm(hi),
                 span(lower, d),
@@ -892,9 +892,9 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         } else {
             result.distance = DistanceBounds { lo: 0.0, hi: Some(hi) };
             result.why = if found.contains(&Some(true)) {
-                "A piece of one part's certified mesh lies inside the other's, and no point was proven inside both."
+                "A piece of one part's mesh lies inside the other's, and no point was found inside both."
             } else {
-                "Whether a piece of one part's certified mesh lies inside the other's is unsettled: every containment \
+                "Whether a piece of one part's mesh lies inside the other's is unsettled: every containment \
                  ray grazed a triangle."
             }
             .into();
@@ -902,7 +902,7 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
     } else {
         result.distance = DistanceBounds { lo: 0.0, hi: Some(hi) };
         result.why = format!(
-            "The certified meshes come within {} of each other, inside the {} the bounds leave open: the parts may \
+            "The meshes come within {} of each other, inside the {} the bounds leave open: the parts may \
              touch, overlap by less than that, or stand apart by less than that.",
             mm(d),
             mm(margin)

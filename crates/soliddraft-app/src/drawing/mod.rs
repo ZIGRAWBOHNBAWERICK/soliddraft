@@ -1155,7 +1155,7 @@ fn part_wait_reason(state: &AppState) -> Option<&'static str> {
     if proof.failed {
         Some("The part edit failed; fix or undo it before rebuilding. The drawing keeps its last views.")
     } else if !proof.current_proved_model() {
-        Some("The requested part revision is not proved yet; the drawing keeps its last views.")
+        Some("The part has not finished building; the drawing keeps its last views.")
     } else {
         None
     }

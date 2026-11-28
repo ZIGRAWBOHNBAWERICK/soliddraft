@@ -776,8 +776,8 @@ contact. Drag collision checks use the same certified meshes.
 
 ## Collision detection and dynamic clearance while dragging
 
-In the desktop Placement panel, enable **Collision detection (mesh-certified)** to stop
-before penetration, or **Dynamic clearance (mesh-certified)** to keep a minimum distance
+In the desktop Placement panel, enable **Collision detection** to stop
+before penetration, or **Dynamic clearance** to keep a minimum distance
 in millimetres. Both use B7's certified meshes at pinned revisions. They include hidden
 parts and parts moved indirectly by mates. Suppressed parts do not participate. The check
 omits stationary pairs and pairs that share one translation without rotating. It reports

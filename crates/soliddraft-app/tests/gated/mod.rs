@@ -220,7 +220,7 @@ impl Kernel for Gated {
     }
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn soliddraft_kernel_api::ProofWork>> {
         if self.rules.lock().unwrap().refuse_proof_reservation {
-            return Err(KernelError::InvalidInput("This edit could not start its proof. Try the edit again".into()));
+            return Err(KernelError::InvalidInput("This edit could not start. Try the edit again".into()));
         }
         self.inner.reserve_proof_work()
     }

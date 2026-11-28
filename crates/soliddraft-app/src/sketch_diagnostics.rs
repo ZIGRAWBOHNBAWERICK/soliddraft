@@ -214,7 +214,7 @@ pub fn panel(
             if report.usage==Usage::Diagnostics {
                 "Read-only warnings. Intentional open paths may be valid. Not automatic repair or a kernel check."
             } else {
-                "Profile preflight only. Feature preview checks depth, direction, intersection and kernel validity. Other feature types are not checked."
+                "Profile preflight only. The feature preview reports depth, direction, intersection and kernel problems. Other feature types have no preflight."
             },
         )
         .size(11.0)

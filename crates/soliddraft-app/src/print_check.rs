@@ -137,7 +137,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             }
             Some(Err(error)) => {
                 ui.label(format!("Export refused: {}", refusal_message(error)));
-                ui.label("Print accuracy and final qualification remain unconfirmed. No file has been written.");
+                ui.label("No file has been written.");
                 // Only accuracy and refinement refusals may offer a coarser request.
                 if can_coarsen(error) {
                     let mm = dialog.accuracy_mm * 2.0;
@@ -147,9 +147,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     {
                         coarser = Some(mm);
                     }
-                    ui.label(
-                        "A coarser request gets its own check. No file is written until you accept a confirmed result.",
-                    );
+                    ui.label("A coarser accuracy is calculated again. No file is written until you accept a result.");
                 }
             }
             Some(Ok(output)) => {
@@ -158,7 +156,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     Report::Mesh(report) => {
                         if let Some(check) = &report.print_check {
                             ui.label(format!(
-                                "Certified accuracy: {} mm",
+                                "Accuracy: {} mm",
                                 soliddraft_exchange::bound_mm(check.certified_accuracy_mm)
                             ));
                             ui.label(format!(
@@ -167,30 +165,23 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                                 soliddraft_exchange::bound_mm(check.tessellation_bound_mm),
                                 soliddraft_exchange::bound_mm(check.rounding_bound_mm)
                             ));
-                            for stage in &check.stages {
-                                ui.label(stage);
-                            }
                         } else {
-                            ui.label("A print-route certificate is unavailable for this model.");
+                            ui.label("No print accuracy report is available for this model.");
                         }
                     }
                     Report::FieldMesh(report) => {
-                        ui.label(format!(
-                            "Certified accuracy: {} mm",
-                            soliddraft_exchange::bound_mm(report.deviation_bound_mm)
-                        ));
+                        ui.label(format!("Accuracy: {} mm", soliddraft_exchange::bound_mm(report.deviation_bound_mm)));
                         ui.label(format!("Minimum detail kept: {} mm", report.minimum_detail_mm));
                         ui.label(format!(
                             "Closed surface: {}. Self-intersection excluded: {}. Connected: {}.",
                             report.closed, report.non_self_intersecting, report.connected
                         ));
-                        ui.label("Field boundary coverage and file rounding certified");
                     }
                     _ => {}
                 }
-                let button = ui.button("Save checked export");
+                let button = ui.button("Save export");
                 #[cfg(target_arch = "wasm32")]
-                crate::web::show_control("Save checked export", button.rect);
+                crate::web::show_control("Save export", button.rect);
                 if button.clicked() {
                     save = true;
                 }
@@ -211,8 +202,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
     }
     if save {
         let result = state.export_ready().and_then(|()| {
-            let output =
-                dialog.result.as_ref().and_then(|result| result.as_ref().ok()).ok_or("No checked export to save")?;
+            let output = dialog.result.as_ref().and_then(|result| result.as_ref().ok()).ok_or("No export to save")?;
             crate::platform::write_file(&dialog.path, &output.bytes).map(|()| output.report.summary())
         });
         match result {
@@ -253,11 +243,11 @@ pub fn can_coarsen(error: &str) -> bool {
 
 fn refusal_message(error: &str) -> String {
     if can_coarsen(error) {
-        "The requested accuracy could not be certified within the calculation limits.".into()
+        "The requested accuracy could not be reached within the calculation limits.".into()
     } else if error.contains("print.brep-topology") || error.contains("field.print-topology") {
-        "A closed, sound print surface could not be confirmed.".into()
+        "SolidDraft could not build a closed, sound print surface from this part.".into()
     } else if error.contains("orientation") {
-        "The print surface's outward orientation could not be confirmed.".into()
+        "SolidDraft could not orient the print surface outward.".into()
     } else if error.contains("field.print-disconnected") {
         "The print output has disconnected pieces. Edit the part before exporting.".into()
     } else if error.contains("unsupported") {

@@ -66,9 +66,9 @@ fn writer_refusal(error: &IgesError) -> Refusal {
             Refusal::new("iges.unsupported-curve", format!("curve kind {kind:?} is not written"))
         }
         IgesError::UnrepresentableDefinition(detail) => Refusal::new("iges.unrepresentable-definition", *detail),
-        IgesError::ToleranceExceeded { proven, requested } => Refusal::new(
+        IgesError::ToleranceExceeded { proven: bound, requested } => Refusal::new(
             "iges.tolerance-exceeded",
-            format!("proven bound {proven} mm exceeds the requested {requested} mm"),
+            format!("the deviation bound {bound} mm exceeds the requested {requested} mm"),
         ),
         IgesError::Decision(refusal) => refusal.clone(),
         IgesError::Io(error) => Refusal::new("iges.io", error.to_string()),

@@ -2021,7 +2021,7 @@ fn registry() -> Vec<CommandSpec> {
                 tools::grade_field_params,
             )
             .undo(Undo::Step),
-        cmd("field_mass", "Field mass", Icon::Cad("mass"), "Prove the active lattice or gyroid's volume, centre of gravity and inertia")
+        cmd("field_mass", "Field mass", Icon::Cad("mass"), "Calculate the active lattice or gyroid's volume, centre of gravity and inertia")
             .agents(
                 Agents::Tool,
                 "Unit-density moments of the field's own definition, as exact rational enclosures: volume within \
@@ -2178,7 +2178,7 @@ fn registry() -> Vec<CommandSpec> {
             .lit(|s| s.chat.book.auto_apply)
             .app_only("It sets what the app's own assistant may do this session; MCP clients and scripts run commands directly"),
         // Inspect.
-        cmd("measure", "Measure", Icon::Cad("measure"), "Prove a distance or angle between two edges or faces")
+        cmd("measure", "Measure", Icon::Cad("measure"), "Measure a distance or angle between two edges or faces")
             .on(Inspect, "Measure", Large)
             .run(|_| AppAction::MeasureEntity)
             .agents(
@@ -2522,11 +2522,11 @@ fn registry() -> Vec<CommandSpec> {
             .key(Scope::Part, ctrl_shift, Key::S)
             .run(|_| AppAction::SaveAs(None))
 .agents(Agents::Mcp, "Saves the part to the file, as save does.", tools::part_path_params),
-        cmd("export_step", "STEP", Icon::Save, "Export the part as STEP AP242, with its proven deviation")
+        cmd("export_step", "STEP", Icon::Save, "Export the part as STEP AP242, with its deviation report")
             .run(|_| AppAction::Export { format: ExportFormat::Step, path: None })
             .when(can_export)
 .agents(Agents::Mcp, "The result carries the deviation report.", app::step_path_params),
-        cmd("export_iges", "IGES", Icon::Save, "Export supported exact surfaces as IGES 5.3, with its proven deviation")
+        cmd("export_iges", "IGES", Icon::Save, "Export supported exact surfaces as IGES 5.3, with its deviation report")
             .run(|_| AppAction::Export { format: ExportFormat::Iges, path: None })
             .when(can_export)
             .agents(Agents::Mcp, "The result carries the deviation report. Unsupported definitions are refused.", app::iges_path_params),

@@ -817,25 +817,54 @@ fn update(o: &Options) -> Result<(), String> {
         // request names something that does not exist: the rebuild is then still saved.
         let mut keep_rebuild = false;
         let requested = (|| -> Result<Vec<(Command, String)>, DrawingError> {
-            let mut requested = Vec::new();
             let annotation = |id| drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id));
+            let mut invalid = Vec::new();
             if o.accept {
                 for c in &report.changed {
-                    annotation(c.annotation)?;
-                    requested.push((
-                        Command::AcceptChange { annotation: c.annotation },
-                        format!("accepted {}", c.annotation),
-                    ));
+                    if annotation(c.annotation).is_err() {
+                        invalid.push(format!("no {0} in the drawing", c.annotation));
+                    }
                 }
             }
             for (id, end, at) in &o.reattach {
                 let id = AnnotationId(*id);
-                if *end >= annotation(id)?.anchors.len() {
-                    return Err(DrawingError::BadRequest(format!("{id} has no end {end}")));
+                match annotation(id) {
+                    Ok(a) if *end >= a.anchors.len() => invalid.push(format!("{id} has no end {end}")),
+                    Ok(_) => {}
+                    Err(_) => invalid.push(format!("no {id} in the drawing")),
                 }
                 if !at.is_finite() {
-                    return Err(DrawingError::BadRequest(format!("The point for end {end} of {id} must be finite")));
+                    invalid.push(format!("The point for end {end} of {id} must be finite"));
                 }
+            }
+            for id in &o.freeze {
+                if annotation(AnnotationId(*id)).is_err() {
+                    invalid.push(format!("no {} in the drawing", AnnotationId(*id)));
+                }
+            }
+            let mut deleted = std::collections::BTreeSet::new();
+            for id in &o.delete {
+                if annotation(AnnotationId(*id)).is_err() {
+                    invalid.push(format!("no {} in the drawing", AnnotationId(*id)));
+                }
+                if !deleted.insert(*id) {
+                    invalid.push(format!("Annotation {id} was requested for deletion twice"));
+                }
+            }
+            if !invalid.is_empty() {
+                return Err(DrawingError::BadRequest(invalid.join("; ")));
+            }
+
+            let mut requested = Vec::new();
+            if o.accept {
+                requested.extend(report.changed.iter().map(|c| {
+                    (Command::AcceptChange { annotation: c.annotation }, format!("accepted {}", c.annotation))
+                }));
+            }
+            // Each end attaches to an edge drawn in its own view, so a section leg or a broken
+            // view picks the edge the user sees there.
+            for (id, end, at) in &o.reattach {
+                let id = AnnotationId(*id);
                 let index = PartIndex::build(part)?;
                 let ctx = derived::context(&drawing, part, &index, annotation(id)?.view)
                     .inspect_err(|_| keep_rebuild = true)?;
@@ -848,18 +877,12 @@ fn update(o: &Options) -> Result<(), String> {
                 ));
             }
             for id in &o.freeze {
-                annotation(AnnotationId(*id))?;
                 requested.push((
                     Command::FreezeAsNote { annotation: AnnotationId(*id) },
                     format!("kept annotation {id} as a note"),
                 ));
             }
-            let mut deleted = std::collections::BTreeSet::new();
             for id in &o.delete {
-                annotation(AnnotationId(*id))?;
-                if !deleted.insert(*id) {
-                    return Err(DrawingError::BadRequest(format!("Annotation {id} was requested for deletion twice")));
-                }
                 requested.push((
                     Command::DeleteAnnotation { annotation: AnnotationId(*id) },
                     format!("deleted annotation {id}"),

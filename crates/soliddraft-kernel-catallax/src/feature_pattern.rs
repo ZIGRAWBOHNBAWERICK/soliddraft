@@ -23,7 +23,7 @@ pub(super) fn refusal(code: &str) -> KernelError {
         "numbers.operation-budget" | "app.resource-limit" => {
             "Pattern needs too much work to finish. Reduce the number of copies"
         }
-        _ => "Pattern could not be verified for this feature and layout. Try fewer copies or a simpler source",
+        _ => "Pattern could not be built for this feature and layout. Try fewer copies or a simpler source",
     };
     KernelError::InvalidInput(message.into())
 }

@@ -6,22 +6,22 @@
 // gyroids; the boundary model previews everything else, and a preview never stands in for an
 // export. Each file is a saved part, opened afresh from the start page:
 //
-// - TRAY (site/parts/tray.dwprt), a boundary-model part. Its first display carries no
-//   "unproved preview" label and no status mark. Its STL export runs the boundary-model print
+// - TRAY (site/parts/tray.dwprt), a boundary-model part. Its first display reports no
+//   field preview and no status mark. Its STL export runs the boundary-model print
 //   route, and the file saved is the checked print mesh, marked as that route in its header.
-// - LATTICE (ci/fixtures/field-preview/lattice.dwprt). The first display carries the
-//   "unproved preview" label and no mark. The STL export runs the distance-field route, and
+// - LATTICE (ci/fixtures/field-preview/lattice.dwprt). The first display reports a
+//   field preview and no mark. The STL export runs the distance-field route, and
 //   the file saved is the certified field mesh, marked as that route in its header.
 // - GYROID (ci/fixtures/field-preview/gyroid.dwprt), the network gyroid G0. Its first display
-//   carries the label and no mark. Its export is not run here: a certified gyroid mesh takes
+//   reports a field preview and no mark. Its export is not run here: a certified gyroid mesh takes
 //   minutes in the browser's debug build.
 // - PIECES (ci/fixtures/field-preview/gyroid-refused-export.dwprt), a network gyroid at level
-//   1/2 in a box it leaves a separate corner piece in, at 2 mm. The screen shows its preview,
-//   labelled, but Catallax cannot settle the boundary within the minimum detail, so the STL
+//   1/2 in a box it leaves a separate corner piece in, at 2 mm. The screen shows its field
+//   preview, but Catallax cannot settle the boundary within the minimum detail, so the STL
 //   export is refused by name, offers no Save, and writes nothing.
 // - GRADED (ci/fixtures/field-preview/gyroid-graded-refused.dwprt), a gyroid level graded
 //   past the range Catallax certifies. The tree marks the gyroid Refused with its reason, the
-//   viewport drops the "unproved preview" label, and the STL command opens no export.
+//   viewport stops reporting a field preview, and the STL command opens no export.
 //
 // The label is the frame probe's name for a field sample on screen. The page itself shows
 // no words about checking.
@@ -282,7 +282,7 @@ async function open(v, label, file) {
   check(first?.viewport.triangles > 0, `${label}: the first viewport frame drew no triangles: ${JSON.stringify(first)}`);
   check(first.viewport.pending === false, `${label}: the first viewport frame still owed a build`);
   const settled = await until(v, label, 'shown_viewport', frame => frame.triangles > 0);
-  check(settled.label === first.viewport.label, `${label}: the preview label changed after the first frame`);
+  check(settled.field_preview === first.viewport.field_preview, `${label}: the field preview changed after the first frame`);
   const marks = await shown(v, 'shown_marks');
   check(JSON.stringify(marks) === JSON.stringify(first.marks), `${label}: the tree marks changed after the first frame`);
   await v.shot(`${label}-opened`);
@@ -308,8 +308,8 @@ async function withoutDownload(label, run) {
 
 async function save(v, label) {
   const controls = await shown(v, 'shown_controls');
-  const button = controls && controls['Save checked export'];
-  check(button, `${label}: the Print check window drew no Save checked export button`);
+  const button = controls && controls['Save export'];
+  check(button, `${label}: the Print check window drew no Save export button`);
   const file = await v.download(label, () => v.click([button.x, button.y]));
   check(file.endsWith('.stl'), `${label}: the export saved ${file}, not an STL file`);
   return stl(file);
@@ -317,7 +317,7 @@ async function save(v, label) {
 
 async function field(v, label, file) {
   const first = await open(v, label, file);
-  check(first.viewport.label === 'unproved preview', `${label}: the first display is labelled ${first.viewport.label}, not unproved preview`);
+  check(first.viewport.field_preview === true, `${label}: the first display is not a field preview`);
   check(first.marks.length === 0, `${label}: a built part shows marks ${JSON.stringify(first.marks)}`);
   const exported = await exportStl(v, label);
   check(exported.route === 'distance field' && exported.state === 'checked',
@@ -339,9 +339,9 @@ async function main() {
     check(await v.eval(`typeof window.wasmBindings.${name} === 'function'`), `the build has no ${name} export`);
   }
 
-  // A boundary-model part: no field label, the boundary-model print route.
+  // A boundary-model part: no field preview, the boundary-model print route.
   const plain = await open(v, 'tray', tray);
-  check(plain.viewport.label === null, `tray: a boundary-model part is labelled ${plain.viewport.label}`);
+  check(plain.viewport.field_preview === false, 'tray: a boundary-model part reports a field preview');
   check(plain.marks.length === 0, `tray: a built part shows marks ${JSON.stringify(plain.marks)}`);
   await v.command('Hide body');
   check((await shown(v, 'shown_viewport'))?.triangles === 0, 'tray: the hidden body still reports triangles');
@@ -367,21 +367,21 @@ async function main() {
   // A lattice: the field sample on screen, the certified field mesh in the file.
   await field(v, 'lattice', lattice);
 
-  // The gyroid G0: the field sample on screen, labelled.
+  // The gyroid G0: the field sample on screen.
   const g0 = await open(v, 'gyroid', gyroid);
-  check(g0.viewport.label === 'unproved preview', `gyroid: the first display is labelled ${g0.viewport.label}`);
+  check(g0.viewport.field_preview === true, 'gyroid: the first display is not a field preview');
   check(g0.marks.length === 0, `gyroid: a built part shows marks ${JSON.stringify(g0.marks)}`);
   evidence.gyroid = { first: g0 };
 
   // A preview on screen does not make an export: Catallax refuses this one.
   const split = await open(v, 'pieces', pieces);
-  check(split.viewport.label === 'unproved preview', `pieces: the preview is labelled ${split.viewport.label}`);
+  check(split.viewport.field_preview === true, 'pieces: the display is not a field preview');
   const refused = await withoutDownload('pieces', async () => {
     const outcome = await exportStl(v, 'pieces');
     check(outcome.state === 'refused' && outcome.route === 'distance field', `pieces: the STL export shows ${JSON.stringify(outcome)}, not a refusal`);
-    check(/could not be certified/.test(outcome.message), `pieces: the refusal reads "${outcome.message}"`);
+    check(/could not be reached/.test(outcome.message), `pieces: the refusal reads "${outcome.message}"`);
     const controls = await shown(v, 'shown_controls');
-    check(!controls['Save checked export'], 'pieces: a refused export offers Save checked export');
+    check(!controls['Save export'], 'pieces: a refused export offers Save export');
     await v.shot('pieces-refused-export');
     await v.click([controls['Print check: Cancel'].x, controls['Print check: Cancel'].y]);
     await v.settle(2000);
@@ -389,11 +389,11 @@ async function main() {
   });
   evidence.pieces = { first: split, exported: refused };
 
-  // A refused field: marked, its label gone, no export opens.
+  // A refused field: marked, no field preview, no export opens.
   const bad = await open(v, 'graded', graded);
   const mark = bad.marks.find(m => m.feature === 'Gyroid1');
   check(mark && mark.mark === 'Refused' && mark.reason, `graded: the tree marks ${JSON.stringify(bad.marks)}, not Gyroid1 Refused with a reason`);
-  check(bad.viewport.label === null, `graded: a refused gyroid keeps the label ${bad.viewport.label}`);
+  check(bad.viewport.field_preview === false, 'graded: a refused gyroid still reports a field preview');
   await withoutDownload('graded', async () => {
     await v.command('STL');
     await v.settle(2000);
@@ -403,7 +403,7 @@ async function main() {
   evidence.graded = { first: bad };
 
   fs.writeFileSync(path.join(out, 'field-preview.json'), JSON.stringify(evidence, null, 1));
-  console.log(`Field preview in the browser: the tray shows unlabelled and exports through the boundary model (${plainFile.triangles} triangles); the lattice shows a labelled sample of ${evidence.lattice.first.viewport.triangles} triangles and exports a certified field mesh of ${evidence.lattice.saved.triangles}; the gyroid shows a labelled sample of ${g0.viewport.triangles}; the split gyroid shows its preview and its export is refused with nothing written; the refused grade is marked "${mark.reason}" and opens no export.`);
+  console.log(`Field preview in the browser: the tray shows no field preview and exports through the boundary model (${plainFile.triangles} triangles); the lattice shows a field sample of ${evidence.lattice.first.viewport.triangles} triangles and exports a certified field mesh of ${evidence.lattice.saved.triangles}; the gyroid shows a field sample of ${g0.viewport.triangles}; the split gyroid shows its preview and its export is refused with nothing written; the refused grade is marked "${mark.reason}" and opens no export.`);
 }
 
 try {

@@ -631,7 +631,7 @@ fn axial_hole(
             .then(|| thread.as_ref().is_some_and(|thread| thread.depth.is_none()))
     });
     if native.is_none() {
-        let asks = format!("Record the checked dimensions of {key}?");
+        let asks = format!("Record the measured dimensions of {key}?");
         if !through && depth.is_none() {
             asking.unanswered(
                 id("geometry"),
@@ -672,7 +672,7 @@ fn axial_hole(
                 id: id("geometry"),
                 asks,
                 proposes: item.hole_callout(&length_text(diameter), Some(&measured)),
-                reason: "The checked walls and axial ends establish these nominal dimensions, not the tolerances."
+                reason: "The measured walls and axial ends establish these nominal dimensions, not the tolerances."
                     .into(),
                 proposal: Some(Proposal::Item { item: Box::new(item) }),
             });

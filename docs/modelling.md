@@ -38,18 +38,18 @@ The Create menu at the top of the palette's Create group lists every command tha
 or removes material, with its shortcut. The pin on a row puts the command in the palette
 or takes it out. Every command starts pinned. The pins are kept in the settings file.
 
-## Geometry proof
+## Precision
 
-Select a body and choose **Prove part** under **Geometry proof** in Properties.
-The check covers every edge of the part, including edges on other bodies. Complex
-parts ask for confirmation first. You can cancel a running proof from Properties.
-The check does not change the viewport.
+Select a body and choose **Show precision** under **Precision** in Properties.
+It covers every edge of the part, including edges on other bodies. Complex parts
+ask for confirmation first. You can cancel a running calculation from Properties.
+It does not change the viewport.
 
-**Open proof report** shows each edge's distance bound or **Could not prove**, plus
-the geometry counts, mass properties and computing cost. **Fully proven** means
-every edge has a certified bound to its incident surfaces; it is not a claim that
-the part is fit for manufacture. An edit clears the verdict. The report and verdict
-are not saved in the part file.
+**Open precision report** shows each edge's distance bound or **no bound**, plus
+the geometry counts, mass properties and computing cost. **Every edge has a
+precision bound** means each edge has a bound on its distance to its incident
+surfaces; it is not a claim that the part is fit for manufacture. An edit clears
+the result. The report is not saved in the part file.
 For numerical geometry, the proof looks for bounds within 0.01 mm.
 
 ## Extrusion options
@@ -491,7 +491,7 @@ covers the original import only and is not copied onto a later modified body.
 
 ## Terminal lattice
 
-With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius can be constant or [graded](#graded-fields). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control certified STL export. The viewport draws the lattice from a sample of its field. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and certified exports still use the native field definition.
+With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius can be constant or [graded](#graded-fields). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control STL export. The viewport draws the lattice from a sample of its field, and the tree row gives the export accuracy. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and exports still use the native field definition.
 
 The lattice stays last. Edit an earlier feature to rebuild it, or return before the lattice to continue CAD work without losing its settings. The `lattice` and `edit_lattice` agent verbs use the same document commands. Both accept `cell` as `cubic`, `body_centred`, `face_centred` or `octet`. A partial edit that omits `cell` keeps the current type. Old two-setting lattice files open with their earlier body visible and a message naming the missing cell size and density. Configure those inputs to build the field.
 

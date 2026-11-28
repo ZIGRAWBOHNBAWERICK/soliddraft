@@ -236,7 +236,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row(
             "pmi_recognise",
             "Recognise features",
-            "List the proved holes, bosses, slots, recesses and edge treatments",
+            "List the recognised holes, bosses, slots, recesses and edge treatments",
         )
         .agents(
             Agents::Tool,

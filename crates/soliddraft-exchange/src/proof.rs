@@ -27,7 +27,7 @@ impl AnswerKind {
     /// Plain label for the report.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Proved => "Proved",
+            Self::Proved => "Exact",
             Self::Pending => "Pending",
             Self::WithinStatedBound => "Within a stated bound",
             Self::Refused => "Refused",
@@ -64,11 +64,49 @@ pub struct ProofReport {
     pub features: Vec<FeatureProof>,
 }
 
-/// Appends to the whole filename, preserving `.step` or `.stp`.
+/// The machine report's format.
+pub const FORMAT: &str = "soliddraft-precision/1";
+/// The format older versions wrote, still read.
+const LEGACY_FORMAT: &str = "soliddraft-proof/1";
+/// The suffix of the reports written beside a STEP file.
+const SUFFIX: &str = "precision";
+/// The suffix older versions wrote, still read.
+const LEGACY_SUFFIX: &str = "proof";
+
+/// Where a report beside `path` is written: the whole filename plus `.precision.<extension>`,
+/// preserving `.step` or `.stp`.
 pub fn sidecar_path(path: &Path, extension: &str) -> PathBuf {
+    suffixed(path, SUFFIX, extension)
+}
+
+/// Where older versions wrote the same report: `.proof.<extension>`.
+pub fn legacy_sidecar_path(path: &Path, extension: &str) -> PathBuf {
+    suffixed(path, LEGACY_SUFFIX, extension)
+}
+
+fn suffixed(path: &Path, suffix: &str, extension: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
-    name.push(format!(".proof.{extension}"));
+    name.push(format!(".{suffix}.{extension}"));
     PathBuf::from(name)
+}
+
+/// Reads the machine report beside the STEP file at `path`: the current name first, then
+/// the name older versions wrote, so their exports still open.
+pub fn read_report(path: &Path) -> Result<serde_json::Value, String> {
+    for candidate in [sidecar_path(path, "json"), legacy_sidecar_path(path, "json")] {
+        let bytes = match std::fs::read(&candidate) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("{}: {error}", candidate.display())),
+        };
+        let report: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|error| format!("{}: {error}", candidate.display()))?;
+        return match report["format"].as_str() {
+            Some(FORMAT | LEGACY_FORMAT) => Ok(report),
+            other => Err(format!("{}: unknown report format {other:?}", candidate.display())),
+        };
+    }
+    Err(format!("{} has no report beside it", path.display()))
 }
 
 impl super::Export {
@@ -81,15 +119,15 @@ impl super::Export {
         mut write: impl FnMut(&Path, &[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
         if matches!(self.report, super::Report::Step(_) | super::Report::StandIn(_)) {
-            let proof = self.proof.as_ref().ok_or("This STEP file has no proof report; export was not written")?;
+            let proof = self.proof.as_ref().ok_or("This STEP file has no build report; export was not written")?;
             if proof.features.iter().any(|feature| {
                 !matches!(feature.answer_kind, AnswerKind::Proved | AnswerKind::Approximate | AnswerKind::Inactive)
             }) {
-                return Err("This part has an unproved answer. STEP export requires a proved result.".into());
+                return Err("This part can't be exported as STEP yet: a feature is still building, was refused, or is answered only within a stated bound.".into());
             }
             let hash = format!("{:x}", Sha256::digest(&self.bytes));
             let json = serde_json::json!({
-                "format": "soliddraft-proof/1",
+                "format": FORMAT,
                 "file": path.file_name().map(|name| name.to_string_lossy()),
                 "sha256": hash,
                 "work_scope": "Original retained feature builds; excludes display and export. Null means unavailable.",
@@ -99,7 +137,7 @@ impl super::Export {
             let mut machine = serde_json::to_vec_pretty(&json).map_err(|e| e.to_string())?;
             machine.push(b'\n');
             let mut human = format!(
-                "SolidDraft STEP proof report\nFile: {}\nSHA-256: {hash}\n{}\n\nWork counts cover original retained feature builds, excluding display and export.\nUnavailable means no count was recorded. Inactive features contributed no geometry.\nDisplay bounds are measured deviations, never model proof.\n",
+                "SolidDraft STEP precision report\nFile: {}\nSHA-256: {hash}\n{}\n\nWork counts cover original retained feature builds, excluding display and export.\nUnavailable means no count was recorded. Inactive features contributed no geometry.\nDisplay bounds are measured deviations of the screen mesh, not of the model.\n",
                 path.display(),
                 self.report.summary()
             );
@@ -128,5 +166,57 @@ impl super::Export {
             write(&sidecar_path(path, "txt"), human.as_bytes())?;
         }
         write(path, &self.bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FORMAT, legacy_sidecar_path, read_report, sidecar_path};
+    use std::path::PathBuf;
+
+    fn folder(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("soliddraft-sidecar-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn reports_are_written_under_the_precision_name() {
+        let step = PathBuf::from("/parts/bracket.step");
+        assert_eq!(sidecar_path(&step, "json"), PathBuf::from("/parts/bracket.step.precision.json"));
+        assert_eq!(sidecar_path(&step, "txt"), PathBuf::from("/parts/bracket.step.precision.txt"));
+        assert_eq!(legacy_sidecar_path(&step, "json"), PathBuf::from("/parts/bracket.step.proof.json"));
+    }
+
+    #[test]
+    fn a_report_an_older_version_wrote_still_reads() {
+        let dir = folder("legacy");
+        let step = dir.join("old.step");
+        std::fs::write(legacy_sidecar_path(&step, "json"), br#"{"format":"soliddraft-proof/1","sha256":"old"}"#)
+            .unwrap();
+        assert_eq!(read_report(&step).unwrap()["sha256"], "old");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_current_report_wins_over_an_older_one() {
+        let dir = folder("current");
+        let step = dir.join("part.step");
+        std::fs::write(legacy_sidecar_path(&step, "json"), br#"{"format":"soliddraft-proof/1","sha256":"old"}"#)
+            .unwrap();
+        std::fs::write(sidecar_path(&step, "json"), format!(r#"{{"format":"{FORMAT}","sha256":"new"}}"#)).unwrap();
+        assert_eq!(read_report(&step).unwrap()["sha256"], "new");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_or_foreign_report_is_refused() {
+        let dir = folder("missing");
+        let step = dir.join("none.step");
+        assert!(read_report(&step).is_err());
+        std::fs::write(sidecar_path(&step, "json"), br#"{"format":"other/1"}"#).unwrap();
+        assert!(read_report(&step).unwrap_err().contains("unknown report format"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

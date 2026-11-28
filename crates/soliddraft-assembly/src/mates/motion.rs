@@ -872,7 +872,7 @@ fn certify(poses: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<Vec<B
                 return Err(refused(
                     std::slice::from_ref(c),
                     RefusalCode::Uncertified,
-                    "the stored placement could not be certified within 1e-9 mm and 1e-9 angular residual; the accepted assembly is unchanged",
+                    "the stored placement could not be placed within 1e-9 mm and 1e-9 angular residual; the accepted assembly is unchanged",
                 ));
             }
             let squared = (r.value.abs_max() * r.value.abs_max()).next_up();

@@ -101,7 +101,9 @@ fn rebuild_names_a_broken_out_cut_that_no_longer_reaches_the_part() {
     let session = state.drawing.session.as_ref().unwrap();
     assert!(session.has_issues());
     assert!(!session.is_up_to_date());
-    assert!(soliddraft_app::drawing::status(&state).unwrap().headline.0.contains("needs a rebuild"));
+    // The refusal is saved with the drawing, so reopening still names the view and its cause.
+    let status = soliddraft_app::drawing::status(&state).unwrap();
+    assert!(status.headline.0.contains(&name) && status.headline.0.contains(cause), "{}", status.headline.0);
 }
 
 /// How many views Catallax drew as hidden-line views, in the calls `kernel` logged since

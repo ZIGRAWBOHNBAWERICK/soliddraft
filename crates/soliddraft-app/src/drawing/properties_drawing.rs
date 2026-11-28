@@ -1026,7 +1026,7 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                 }));
             }
             for (key, label) in
-                [("owner", "Owner"), ("status", "Status"), ("checked", "Checked"), ("approved", "Approved")]
+                [("owner", "Owner"), ("status", "Status"), ("checked", "Checker"), ("approved", "Approved")]
             {
                 let current = sheet.format_overrides.get(key).map_or("", String::as_str);
                 if let Some(value) = sheet_text_field(ui, fields, label, current, "") {

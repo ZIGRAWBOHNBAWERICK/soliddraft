@@ -610,8 +610,8 @@ fn headline(r: &MateRefusal) -> &'static str {
         C::UnderConstrained => "Freedom remains",
         C::DanglingReference => "A mated face is gone",
         C::UnsupportedPlacement => "A part is turned off the quarter turns",
-        C::UnsupportedPlane | C::NotParallel => "A face cannot be proved for this mate",
-        C::UnsupportedReference => "An axis, point, profile or slot cannot be proved for this mate",
+        C::UnsupportedPlane | C::NotParallel => "This mate does not support this face",
+        C::UnsupportedReference => "This mate does not support this axis, point, profile or slot",
         _ => "Refused",
     }
 }
@@ -975,7 +975,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState) {
         let alignment = m["alignment"].as_str().unwrap_or("?");
         let gap = |m: &serde_json::Value| m["measurement"]["value"].as_f64();
         let shown = |v: Option<f64>, unit: &str| {
-            v.map_or("unproved".to_owned(), |v| format!("{} mm{unit}", crate::document::fmt_mm(v)))
+            v.map_or("not measured".to_owned(), |v| format!("{} mm{unit}", crate::document::fmt_mm(v)))
         };
         let line = match m["kind"].as_str() {
             Some("distance") => {

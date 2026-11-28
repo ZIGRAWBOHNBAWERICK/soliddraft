@@ -121,9 +121,9 @@ impl CatallaxKernel {
             tessellation_bound_mm: step::f64_up(output.tessellation_bound()),
             rounding_bound_mm: step::f64_up(output.rounding_bound()),
             stages: vec![
-                "Model accuracy certified".into(),
-                "Finite faces and trims certified".into(),
-                "File coordinate rounding certified".into(),
+                "Model accuracy within the bound".into(),
+                "Finite faces and trims within the bound".into(),
+                "File coordinate rounding within the bound".into(),
                 "Closed surface and vertex connections confirmed".into(),
                 "Outward orientation confirmed, including cavities".into(),
                 "All components and cavities preserved".into(),
@@ -154,13 +154,13 @@ impl CatallaxKernel {
             .collect::<KernelResult<Vec<_>>>()?;
         let mut mesh = convert::triangles(&positions, triangles);
         if params.curve_angle_deg > 0.0 || params.surface_angle_deg > 0.0 {
-            mesh.unavailable_controls.push("Angle controls are not certified by the print route".into());
+            mesh.unavailable_controls.push("The print route does not apply angle controls".into());
         }
         if params.max_edge_length > 0.0 {
-            mesh.unavailable_controls.push("Maximum edge length is not certified by the print route".into());
+            mesh.unavailable_controls.push("The print route does not apply a maximum edge length".into());
         }
         if params.max_aspect_ratio > 0.0 {
-            mesh.unavailable_controls.push("Aspect ratio is not certified by the print route".into());
+            mesh.unavailable_controls.push("The print route does not apply an aspect ratio limit".into());
         }
         Ok(PrintMesh { mesh, stl, report })
     }

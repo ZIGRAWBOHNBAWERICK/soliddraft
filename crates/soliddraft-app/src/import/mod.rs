@@ -938,7 +938,7 @@ pub fn record_rows(record: &RepairRecord) -> Vec<(String, String)> {
         rows.push((
             "Admission".into(),
             if record.derivative.is_some() {
-                "Certified solid. Source admission evidence is recorded.".into()
+                "Solid. Source admission evidence is recorded.".into()
             } else {
                 crate::document::TOLERANT_WORDS.into()
             },

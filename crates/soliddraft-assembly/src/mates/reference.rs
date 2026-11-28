@@ -335,7 +335,7 @@ impl AssemblyDocument {
         let source = display
             .as_deref()
             .and_then(|d| d.kernel_source())
-            .ok_or_else(|| unavailable("this session has no kernel to prove planes on".into()))?;
+            .ok_or_else(|| unavailable("this session has no kernel to read planes from".into()))?;
         let mut part = source.exact(&bytes, None).map_err(unavailable)?;
         if let Some(c) = &r.configuration {
             if !part.configuration_names().iter().any(|(id, _)| id == c) {
@@ -832,7 +832,7 @@ fn feature_plane(part: &PartDocument, id: FeatureId, depth: usize) -> Result<([i
         SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => Err(MateRefusal::new(
             RefusalCode::UnsupportedPlane,
             format!(
-                "{} is defined on a face; this version proves datum-based planes only, so mate the face itself",
+                "{} is defined on a face; this version mates datum-based planes only, so mate the face itself",
                 feature.name
             ),
         )),

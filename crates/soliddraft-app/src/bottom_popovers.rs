@@ -151,7 +151,7 @@ fn physical_id(state: &AppState) -> egui::Id {
 }
 
 /// Why the body shown cannot be measured once nothing more is building, or `None` while
-/// a rebuild or the display can still bring a proved body.
+/// a rebuild or the display can still bring an exact body.
 fn not_measurable(proof: &crate::document::ProofState) -> Option<&'static str> {
     let settled = !proof.pending
         && !proof.transient
@@ -164,9 +164,9 @@ fn not_measurable(proof: &crate::document::ProofState) -> Option<&'static str> {
     Some(if proof.failed {
         "The last change did not build, so the body shown is not its result and is not measured."
     } else if proof.answered_within_bound {
-        "The body shown is a preview within a stated bound, not a proved solid, so it has no exact mass."
+        "The body shown is a preview within a stated bound, so it has no exact mass."
     } else {
-        "The body shown is not proved, so its mass is not measured."
+        "The body shown is a preview, so its mass is not measured."
     })
 }
 

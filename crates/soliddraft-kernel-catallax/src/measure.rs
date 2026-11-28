@@ -48,7 +48,7 @@ fn refuse(code: &str, detail: String) -> KernelError {
 
 /// A proof with accuracy marks, or without a converged upper bound, is not a number.
 fn incomplete(query: &str, detail: impl std::fmt::Debug) -> KernelError {
-    refuse("measure.bounds-incomplete", format!("{query} proof is incomplete: {detail:?}"))
+    refuse("measure.bounds-incomplete", format!("{query} bounds are incomplete: {detail:?}"))
 }
 
 pub(super) fn edge_length(k: &CatallaxKernel, body: BodyId, edge: EdgeId) -> KernelResult<Measurement> {
@@ -59,7 +59,7 @@ pub(super) fn edge_length(k: &CatallaxKernel, body: BodyId, edge: EdgeId) -> Ker
     })
     .map_err(|e| query_error("edge_length", e))?;
     if !answer.marks.is_empty() {
-        return Err(KernelError::Unsupported(format!("edge_length proof has accuracy marks: {:?}", answer.marks)));
+        return Err(KernelError::Unsupported(format!("edge_length answer has accuracy marks: {:?}", answer.marks)));
     }
     Ok(enclosure(&answer.value))
 }
@@ -72,7 +72,7 @@ pub(super) fn face_area(k: &CatallaxKernel, body: BodyId, face: FaceId) -> Kerne
     })
     .map_err(|e| query_error("face_area", e))?;
     if !answer.marks.is_empty() {
-        return Err(KernelError::Unsupported(format!("face_area proof has accuracy marks: {:?}", answer.marks)));
+        return Err(KernelError::Unsupported(format!("face_area answer has accuracy marks: {:?}", answer.marks)));
     }
     Ok(enclosure(&answer.value))
 }

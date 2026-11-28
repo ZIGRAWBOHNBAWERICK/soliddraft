@@ -54,10 +54,8 @@ fn inspect_check_reports_independent_coverage_and_invalidates_on_undo() {
     assert!(report.steps.iter().all(|step| step.reference || step.unconfirmed.is_empty()));
     assert!(app.query_by_label("Coverage: 1 of 1 solid steps confirmed independently (100%).").is_some());
     assert!(
-        app.query_by_label(
-            "This checks construction coverage. Surface agreement and print accuracy are not checked here."
-        )
-        .is_some()
+        app.query_by_label("This report covers construction coverage only, not surface agreement or print accuracy.")
+            .is_some()
     );
     assert_eq!(app.state().state.doc.model().part_json(), before);
     assert_eq!(app.state().state.doc.undo_depth(), undo);
@@ -87,7 +85,7 @@ fn mesh_exports_show_the_native_certificate_before_writing() {
         assert_eq!(std::fs::read(&path).unwrap(), previous);
         let expected = output.bytes.clone();
         case.frame(&mut app, format.extension());
-        click(&mut app, "Save checked export");
+        click(&mut app, "Save export");
         assert!(app.state().state.print_check.is_none());
         assert_eq!(std::fs::read(&path).unwrap(), expected);
         if format == Format::Stl {
@@ -154,7 +152,7 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
     let expected = dialog.result.as_ref().unwrap().as_ref().unwrap().bytes.clone();
     case.frame(&mut app, "coarser-confirmed");
     assert_eq!(app.state().state.doc.model().settings(), &settings);
-    click(&mut app, "Save checked export");
+    click(&mut app, "Save export");
     assert_eq!(std::fs::read(&path).unwrap(), expected);
     app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
     settle(&mut app);
@@ -174,7 +172,7 @@ fn changing_the_part_prevents_saving_an_earlier_checked_export() {
     app.state_mut().state.push(AppAction::Command(Command::Rollback(Some(0))));
     app.run_steps(4);
     assert!(app.query_by_label("The part changed. Close this report and export again.").is_some());
-    assert!(app.query_all_by_role_and_label(Role::Button, "Save checked export").next().is_none());
+    assert!(app.query_all_by_role_and_label(Role::Button, "Save export").next().is_none());
     assert!(!path.exists());
 }
 
@@ -219,6 +217,6 @@ fn a_field_export_reviews_its_native_route_and_verdict_before_saving() {
     assert!(!path.exists());
     let expected = output.bytes.clone();
     case.frame(&mut app, "certified-field");
-    click(&mut app, "Save checked export");
+    click(&mut app, "Save export");
     assert_eq!(std::fs::read(path).unwrap(), expected);
 }

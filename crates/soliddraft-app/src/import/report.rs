@@ -32,12 +32,12 @@ pub enum Tier {
 impl Tier {
     pub fn label(self) -> &'static str {
         match self {
-            Tier::Exact => "Certified solid",
-            Tier::Repaired => "Certified solid, repaired",
+            Tier::Exact => "Solid",
+            Tier::Repaired => "Solid, repaired",
             Tier::Tolerant => "Tolerant solid",
             Tier::Surface => "Surface body",
             Tier::Refused => "Refused",
-            Tier::FileRepaired => "Certified solid, file repaired",
+            Tier::FileRepaired => "Solid, file repaired",
             Tier::NotEvaluated => "Not evaluated",
         }
     }
@@ -72,8 +72,6 @@ pub struct Row {
     pub tier: Tier,
     /// Why it opened as it did, in words.
     pub why: String,
-    /// A check the import did not run, in words.
-    pub not_checked: Option<String>,
     /// The import feature, absent for a refused file.
     pub feature: Option<FeatureId>,
 }
@@ -93,7 +91,6 @@ pub fn rows(doc: &Document, refused: &[Refusal]) -> Vec<Row> {
         format: r.format,
         tier: Tier::Refused,
         why: r.reason.clone(),
-        not_checked: None,
         feature: None,
     }));
     rows
@@ -102,8 +99,7 @@ pub fn rows(doc: &Document, refused: &[Refusal]) -> Vec<Row> {
 /// The row of import feature `id`.
 pub fn row(doc: &Document, id: FeatureId, file: String, format: ImportFormat) -> Row {
     let (tier, why) = opened_as(doc, id);
-    let not_checked = doc.model().import_check_note(model_id(id));
-    Row { file, format, tier, why, not_checked, feature: Some(id) }
+    Row { file, format, tier, why, feature: Some(id) }
 }
 
 /// What import feature `id` opened as, and why.
@@ -114,7 +110,7 @@ fn opened_as(doc: &Document, id: FeatureId) -> (Tier, String) {
         FeatureStatus::Error(error) => return (Tier::Refused, error.clone()),
         FeatureStatus::Inactive if feature.suppressed => return unbuilt("Suppressed, so it is not built."),
         FeatureStatus::Inactive => return unbuilt("Past the rollback bar, so it is not built."),
-        FeatureStatus::Pending => return unbuilt("Its proof is still pending."),
+        FeatureStatus::Pending => return unbuilt("It is still building."),
         FeatureStatus::Ok | FeatureStatus::NeedsRepair(_) | FeatureStatus::AnsweredWithinBound(_) => {}
     }
     let Some(body) = feature.body else { return unbuilt("It has no body.") };
@@ -137,7 +133,7 @@ fn opened_as(doc: &Document, id: FeatureId) -> (Tier, String) {
         return (Tier::Exact, "Closed as it is.".into());
     };
     if record.tolerant.is_some() {
-        return (Tier::Exact, "Certified by the default reader. Source admission evidence is recorded.".into());
+        return (Tier::Exact, "Read as a solid by the default reader. Source admission evidence is recorded.".into());
     }
     // A file of several solids shares one record. A repaired face names its solid, so it
     // belongs to that body; a gap change names only source entities, so it stays the
@@ -265,14 +261,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                 for row in &rows {
                     ui.label(&row.file).on_hover_text(row.format.label());
                     ui.label(row.tier.label());
-                    ui.vertical(|ui| {
-                        ui.add(egui::Label::new(&row.why).wrap());
-                        if let Some(note) = &row.not_checked {
-                            let message =
-                                egui::RichText::new(format!("Not checked: {note}")).color(crate::theme::muted());
-                            ui.add(egui::Label::new(message).wrap());
-                        }
-                    });
+                    ui.add(egui::Label::new(&row.why).wrap());
                     ui.horizontal(|ui| {
                         if let Some(feature) = row.feature {
                             if ui.button("Show in tree").clicked() {
